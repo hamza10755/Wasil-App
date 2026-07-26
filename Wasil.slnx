@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Wasil.Api/Wasil.Api.csproj" />
+  <Project Path="Wasil.Data/Wasil.Data.csproj" />
+  <Project Path="Wasil.Service/Wasil.Service.csproj" />
+</Solution>
