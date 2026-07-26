@@ -45,6 +45,19 @@ public partial class WasilDbContext : DbContext
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WasilDbContext).Assembly);
 
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (typeof(BaseEntity).IsAssignableFrom(entityType.ClrType))
+            {
+                var parameter = System.Linq.Expressions.Expression.Parameter(entityType.ClrType, "e");
+                var property = System.Linq.Expressions.Expression.Property(parameter, nameof(BaseEntity.IsDeleted));
+                var notEqual = System.Linq.Expressions.Expression.NotEqual(property, System.Linq.Expressions.Expression.Constant(true));
+                var lambda = System.Linq.Expressions.Expression.Lambda(notEqual, parameter);
+
+                modelBuilder.Entity(entityType.ClrType).HasQueryFilter(lambda);
+            }
+        }
+
         modelBuilder.Entity<Break>(entity =>
         {
             entity.ToTable("Break");

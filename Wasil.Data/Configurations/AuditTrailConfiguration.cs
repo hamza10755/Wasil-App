@@ -16,8 +16,8 @@ public class AuditTrailConfiguration : IEntityTypeConfiguration<AuditTrail>
         builder.Property(at => at.EntityName).HasMaxLength(100).IsRequired();
         builder.Property(at => at.EntityId).HasMaxLength(100).IsRequired();
         builder.Property(at => at.Action).HasMaxLength(50).IsRequired();
-        builder.Property(at => at.Changes).IsRequired(); // hold JSON payload
+        builder.Property(at => at.ChangesJson).IsRequired();
         builder.Property(at => at.TimestampUtc).IsRequired();
-        builder.Property(at => at.UserId).HasMaxLength(100).IsRequired(false);
+        builder.Property(at => at.UserId).IsRequired(false);
     }
 }

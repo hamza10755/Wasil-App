@@ -20,7 +20,7 @@ public class OrderStatusHistoryConfiguration : IEntityTypeConfiguration<OrderSta
 
         // Relationships
         builder.HasOne(osh => osh.Order)
-               .WithMany()
+               .WithMany(o => o.StatusHistories)
                .HasForeignKey(osh => osh.OrderId)
                .OnDelete(DeleteBehavior.Restrict);
     }

@@ -21,7 +21,7 @@ public class AddressConfiguration : IEntityTypeConfiguration<Address>
 
         // Relationships
         builder.HasOne(a => a.Customer)
-               .WithMany()
+               .WithMany(c => c.Addresses)
                .HasForeignKey(a => a.CustomerId)
                .OnDelete(DeleteBehavior.Restrict);
 

@@ -1,11 +1,22 @@
 using Microsoft.EntityFrameworkCore;
 using Wasil.Data.Entities;
+using Wasil.Data.Interceptors;
 using Wasil.Service.Interfaces;
 using Wasil.Service.Services;
 
+using Serilog;
+
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Host.UseSerilog((context, configuration) => 
+    configuration.ReadFrom.Configuration(context.Configuration));
+
 builder.Services.AddControllers();
+
+builder.Services.AddDbContext<WasilDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
+           .AddInterceptors(new AuditInterceptor()));
+
 builder.Services.AddEndpointsApiExplorer();
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -17,6 +28,8 @@ builder.Services.AddDbContext<WasilDbContext>(options =>
 builder.Services.AddScoped<IOrderService, OrderService>();
 
 var app = builder.Build();
+
+app.UseSerilogRequestLogging();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
