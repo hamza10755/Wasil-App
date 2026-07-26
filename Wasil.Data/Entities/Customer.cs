@@ -3,9 +3,8 @@ using System.Collections.Generic;
 
 namespace Wasil.Data.Entities;
 
-public partial class Customer
+public partial class Customer: BaseEntity
 {
-    public int CustomerId { get; set; }
 
     public string? PhoneNumber { get; set; }
 

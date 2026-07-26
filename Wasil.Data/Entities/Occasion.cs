@@ -3,9 +3,8 @@ using System.Collections.Generic;
 
 namespace Wasil.Data.Entities;
 
-public partial class Occasion
+public partial class Occasion : BaseEntity
 {
-    public int OccasionId { get; set; }
 
     public string? OccasionType { get; set; }
 

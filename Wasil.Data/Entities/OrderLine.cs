@@ -3,9 +3,8 @@ using System.Collections.Generic;
 
 namespace Wasil.Data.Entities;
 
-public partial class OrderLine
+public partial class OrderLine : BaseEntity
 {
-    public int LineId { get; set; }
 
     public int? Quantity { get; set; }
 

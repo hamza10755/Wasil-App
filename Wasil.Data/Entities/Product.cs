@@ -3,15 +3,14 @@ using System.Collections.Generic;
 
 namespace Wasil.Data.Entities;
 
-public partial class Product
+public partial class Product : BaseEntity
 {
-    public int ProductId { get; set; }
 
-    public int? StoreId { get; set; }
+    public int StoreId { get; set; }
 
     public string? Name { get; set; }
 
-    public int? Price { get; set; }
+    public int Price { get; set; }
 
     public bool Availability { get; set; }
 
@@ -19,5 +18,5 @@ public partial class Product
 
     public virtual ICollection<ProductModifier> ProductModifiers { get; set; } = new List<ProductModifier>();
 
-    public virtual Store? Store { get; set; }
+    public virtual Store Store { get; set; } = null!;
 }
