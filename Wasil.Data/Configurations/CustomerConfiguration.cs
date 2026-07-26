@@ -16,5 +16,18 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         builder.Property(c => c.LastName).HasMaxLength(15);
         builder.Property(c => c.Gender).HasMaxLength(20);
         builder.Property(c => c.Location).HasMaxLength(255);
+        
+        builder.Property(c => c.Email)
+               .HasColumnName("email")
+               .HasMaxLength(150)
+               .IsRequired();
+               
+        builder.HasIndex(c => c.Email)
+               .IsUnique();
+
+        builder.HasMany(c => c.Addresses)
+               .WithOne(a => a.Customer)
+               .HasForeignKey(a => a.CustomerId)
+               .OnDelete(DeleteBehavior.Restrict);
     }
 }

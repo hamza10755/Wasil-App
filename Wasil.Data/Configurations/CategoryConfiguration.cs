@@ -18,8 +18,8 @@ public class CategoryConfiguration : IEntityTypeConfiguration<Category>
 
         // Relationships
         builder.HasMany(c => c.Products)
-               .WithOne()
-               .HasForeignKey("CategoryId")
+               .WithOne(p => p.Category)
+               .HasForeignKey(p => p.CategoryId)
                .OnDelete(DeleteBehavior.Restrict);
     }
 }

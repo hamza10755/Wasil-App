@@ -106,7 +106,7 @@ public partial class WasilDbContext : DbContext
 
             entity.Property(e => e.CustomerId).HasColumnName("customerId");
             entity.Property(e => e.DriverId).HasColumnName("driverId");
-            entity.Property(e => e.OrderStatus).HasColumnName("orderStatus");
+            entity.Property(e => e.Status).HasColumnName("orderStatus");
             entity.Property(e => e.StoreId).HasColumnName("storeId");
 
             entity.HasOne(d => d.Customer).WithMany(p => p.Orders)
