@@ -11,7 +11,7 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
         builder.HasKey(p => p.Id);
         builder.Property(p => p.Id).HasColumnName("productId");
 
-        builder.Property(p => p.Name).HasMaxLength(15);
+        builder.Property(p => p.Name).HasMaxLength(100);
         builder.Property(p => p.Availability).HasDefaultValue(true);
         builder.Property(p => p.Price).HasColumnType("decimal(18,2)").IsRequired();
         builder.Property(p => p.StockQuantity).HasDefaultValue(0);

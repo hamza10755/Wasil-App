@@ -22,12 +22,20 @@ builder.Services.AddEndpointsApiExplorer();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
-builder.Services.AddDbContext<WasilDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
-
 builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<DatabaseSeeder>();
 
 var app = builder.Build();
+
+if (args.Contains("--reseed"))
+{
+    using (var scope = app.Services.CreateScope())
+    {
+        var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
+        seeder.SeedAll();
+    }
+    return;
+}
 
 app.UseSerilogRequestLogging();
 
@@ -39,30 +47,39 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+app.MapGet("/api/test/stores", (WasilDbContext db) => 
+    db.Stores.Take(10).ToList());
 
-app.MapGet("/weatherforecast", () =>
+app.MapGet("/api/test/customers", (WasilDbContext db) => 
+    db.Customers.Take(10).ToList());
+
+app.MapGet("/api/test/products", (WasilDbContext db) => 
+    db.Products.Take(1000).ToList());
+
+app.MapDelete("/api/test/customers/{id:int}", (int id, WasilDbContext db) =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    var customer = db.Customers.Find(id);
+    if (customer == null) return Results.NotFound($"Customer {id} not found.");
+    db.Customers.Remove(customer);
+    db.SaveChanges();
+    return Results.Ok($"Customer {id} has been soft-deleted. Check the AuditTrail table!");
+});
+
+app.MapGet("/api/test/audit", (WasilDbContext db) => 
+    db.AuditTrails.OrderByDescending(a => a.TimestampUtc).Take(20).ToList());
+
+app.MapGet("/api/test/counts", (WasilDbContext db) => new
+{
+    Stores = db.Stores.Count(),
+    Customers = db.Customers.Count(),
+    Products = db.Products.Count(),
+    Categories = db.Categories.Count(),
+    Addresses = db.Addresses.Count(),
+    OrderStatusHistories = db.OrderStatusHistories.Count(),
+    AuditTrails = db.AuditTrails.Count()
+});
 
 app.MapControllers();
 
 app.Run();
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
