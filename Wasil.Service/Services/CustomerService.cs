@@ -18,27 +18,8 @@ public class CustomerService : ICustomerService
         _dbContext = dbContext;
     }
 
-    private void ValidateEmailAndPhone(string email, string phone)
-    {
-        if (string.IsNullOrWhiteSpace(email))
-            throw new ArgumentException("Email is required.");
-        
-        if (string.IsNullOrWhiteSpace(phone))
-            throw new ArgumentException("Phone number is required.");
-
-        var emailRegex = new Regex(@"^[^@\s]+@[^@\s]+\.[^@\s]+$");
-        if (!emailRegex.IsMatch(email))
-            throw new ArgumentException("Invalid email format.");
-
-        var phoneRegex = new Regex(@"^\d{10,15}$");
-        if (!phoneRegex.IsMatch(phone))
-            throw new ArgumentException("Invalid phone number format. Must contain 10 to 15 digits.");
-    }
-
     public CustomerDto CreateCustomer(CreateCustomerDto dto)
     {
-        ValidateEmailAndPhone(dto.Email, dto.PhoneNumber);
-
         if (_dbContext.Customers.Any(c => c.Email == dto.Email))
             throw new InvalidOperationException("Email already exists.");
 
@@ -63,8 +44,6 @@ public class CustomerService : ICustomerService
         var customer = _dbContext.Customers.Find(id);
         if (customer == null)
             throw new KeyNotFoundException($"Customer with ID {id} not found.");
-
-        ValidateEmailAndPhone(dto.Email, dto.PhoneNumber);
 
         if (_dbContext.Customers.Any(c => c.Email == dto.Email && c.Id != id))
             throw new InvalidOperationException("Email is already used by another customer.");

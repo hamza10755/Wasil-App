@@ -21,33 +21,15 @@ public class OrderController : ControllerBase
     [HttpPost]
     public IActionResult PlaceOrder([FromBody] CreateOrderDto dto)
     {
-        try
-        {
-            var newOrder = _orderService.PlaceOrder(dto);
-            return StatusCode(201, newOrder);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { error = ex.Message });
-        }
+        var newOrder = _orderService.PlaceOrder(dto);
+        return StatusCode(201, newOrder);
     }
 
     [HttpGet("{id:int}")]
     public IActionResult GetOrderDetails(int id)
     {
-        try
-        {
-            var details = _orderService.GetOrderDetails(id);
-            return Ok(details);
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new { error = ex.Message });
-        }
+        var details = _orderService.GetOrderDetails(id);
+        return Ok(details);
     }
 
     [HttpGet("customer/{customerId:int}")]
@@ -60,41 +42,14 @@ public class OrderController : ControllerBase
     [HttpPut("{id:int}/status")]
     public IActionResult UpdateOrderStatus(int id, [FromBody] UpdateOrderStatusRequest request)
     {
-        try
-        {
-            _orderService.UpdateOrderStatus(id, request.Status);
-            return NoContent();
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new { error = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { error = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        _orderService.UpdateOrderStatus(id, request.Status);
+        return NoContent();
     }
 
     [HttpGet("dashboard/{storeId:int}")]
     public IActionResult GetStoreDashboard(int storeId)
     {
-        try
-        {
-            var dashboard = _orderService.GetStoreDashboard(storeId);
-            return Ok(dashboard);
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new { error = ex.Message });
-        }
+        var dashboard = _orderService.GetStoreDashboard(storeId);
+        return Ok(dashboard);
     }
-}
-
-public class UpdateOrderStatusRequest
-{
-    public OrderStatus Status { get; set; }
 }

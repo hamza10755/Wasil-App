@@ -24,15 +24,8 @@ public class CatalogController : ControllerBase
     [HttpGet("stores/{id:int}")]
     public IActionResult GetStoreDetails(int id)
     {
-        try
-        {
-            var result = _catalogService.GetStoreDetails(id);
-            return Ok(result);
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new { error = ex.Message });
-        }
+        var result = _catalogService.GetStoreDetails(id);
+        return Ok(result);
     }
 
     [HttpGet("products")]

@@ -1,44 +1,41 @@
-### Variables
-@host = http://localhost:5242
+### Wasil API End-to-End Scenario Script
+# Execute these requests sequentially from top to bottom to verify the complete order lifecycle.
+
+@host = http://localhost:5247
 @customerId = 1
-@storeId = 1
 @addressId = 1
+@storeId = 1
+@productId = 1
 @orderId = 1
 
-### 1. Create a Customer
+### Step 1: Create a Customer
 POST {{host}}/api/v1/customers
 Content-Type: application/json
 
 {
-  "firstName": "Developer",
-  "lastName": "Antigravity",
-  "email": "dev.antigravity@wasil.com",
-  "phoneNumber": "0798765432"
+  "firstName": "Integration",
+  "lastName": "Tester",
+  "email": "integration.tester@wasil.com",
+  "phoneNumber": "0791234567"
 }
 
-### 2. Add an Address for the Customer
+### Step 2: Add an Address for the Customer
 POST {{host}}/api/v1/customers/{{customerId}}/addresses
 Content-Type: application/json
 
 {
-  "street": "123 Agent Lane",
+  "street": "100 Main St",
   "city": "Amman",
-  "zipCode": "11190",
+  "zipCode": "11190"
 }
 
-### 3. List Customer Addresses
-GET {{host}}/api/v1/customers/{{customerId}}/addresses
+### Step 3: Search Products (Find Store and Product)
+# Note the storeId and productId returned in the response items.
+GET {{host}}/api/v1/products?text=milk&page=1&pageSize=5
 
-### 4. List Stores
-GET {{host}}/api/v1/stores?name=Market&page=1&pageSize=5
-
-### 5. Search Products (Catalog)
-GET {{host}}/api/v1/products?storeId={{storeId}}&text=milk&page=1&pageSize=5
-
-### 6. Store Details (With Product Count)
-GET {{host}}/api/v1/stores/{{storeId}}
-
-### 7. Place an Order
+### Step 4: Place an Order
+# Make sure customerId, storeId, and addressId match existing records.
+# Product must belong to the specified store.
 POST {{host}}/api/v1/orders
 Content-Type: application/json
 
@@ -49,19 +46,16 @@ Content-Type: application/json
   "paymentMethod": 0,
   "lines": [
     {
-      "productId": 1,
-      "quantity": 2
+      "productId": {{productId}},
+      "quantity": 1
     }
   ]
 }
 
-### 8. Get Order Details
+### Step 5: Get Order Details (Check initial Pending status)
 GET {{host}}/api/v1/orders/{{orderId}}
 
-### 9. Get Customer Order History
-GET {{host}}/api/v1/orders/customer/{{customerId}}?page=1&pageSize=5
-
-### 10. Update Order Status (Pending -> Accepted)
+### Step 6a: Update Status to Accepted (1)
 PUT {{host}}/api/v1/orders/{{orderId}}/status
 Content-Type: application/json
 
@@ -69,5 +63,32 @@ Content-Type: application/json
   "status": 1
 }
 
-### 11. Get Store Dashboard
+### Step 6b: Update Status to Preparing (2)
+PUT {{host}}/api/v1/orders/{{orderId}}/status
+Content-Type: application/json
+
+{
+  "status": 2
+}
+
+### Step 6c: Update Status to OutForDelivery (3)
+PUT {{host}}/api/v1/orders/{{orderId}}/status
+Content-Type: application/json
+
+{
+  "status": 3
+}
+
+### Step 6d: Update Status to Delivered (4)
+PUT {{host}}/api/v1/orders/{{orderId}}/status
+Content-Type: application/json
+
+{
+  "status": 4
+}
+
+### Step 7: Get Order Details Again (Verify complete status logs)
+GET {{host}}/api/v1/orders/{{orderId}}
+
+### Step 8: Get Store Dashboard (Verify metrics reflect the completed order)
 GET {{host}}/api/v1/orders/dashboard/{{storeId}}
