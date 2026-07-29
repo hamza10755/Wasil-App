@@ -1,0 +1,73 @@
+### Variables
+@host = http://localhost:5242
+@customerId = 1
+@storeId = 1
+@addressId = 1
+@orderId = 1
+
+### 1. Create a Customer
+POST {{host}}/api/v1/customers
+Content-Type: application/json
+
+{
+  "firstName": "Developer",
+  "lastName": "Antigravity",
+  "email": "dev.antigravity@wasil.com",
+  "phoneNumber": "0798765432"
+}
+
+### 2. Add an Address for the Customer
+POST {{host}}/api/v1/customers/{{customerId}}/addresses
+Content-Type: application/json
+
+{
+  "street": "123 Agent Lane",
+  "city": "Amman",
+  "zipCode": "11190",
+}
+
+### 3. List Customer Addresses
+GET {{host}}/api/v1/customers/{{customerId}}/addresses
+
+### 4. List Stores
+GET {{host}}/api/v1/stores?name=Market&page=1&pageSize=5
+
+### 5. Search Products (Catalog)
+GET {{host}}/api/v1/products?storeId={{storeId}}&text=milk&page=1&pageSize=5
+
+### 6. Store Details (With Product Count)
+GET {{host}}/api/v1/stores/{{storeId}}
+
+### 7. Place an Order
+POST {{host}}/api/v1/orders
+Content-Type: application/json
+
+{
+  "customerId": {{customerId}},
+  "storeId": {{storeId}},
+  "addressId": {{addressId}},
+  "paymentMethod": 0,
+  "lines": [
+    {
+      "productId": 1,
+      "quantity": 2
+    }
+  ]
+}
+
+### 8. Get Order Details
+GET {{host}}/api/v1/orders/{{orderId}}
+
+### 9. Get Customer Order History
+GET {{host}}/api/v1/orders/customer/{{customerId}}?page=1&pageSize=5
+
+### 10. Update Order Status (Pending -> Accepted)
+PUT {{host}}/api/v1/orders/{{orderId}}/status
+Content-Type: application/json
+
+{
+  "status": 1
+}
+
+### 11. Get Store Dashboard
+GET {{host}}/api/v1/orders/dashboard/{{storeId}}

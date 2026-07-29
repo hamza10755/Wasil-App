@@ -87,26 +87,12 @@ public class CustomerService : ICustomerService
         if (!customerExists)
             throw new KeyNotFoundException($"Customer with ID {customerId} not found.");
 
-        var hasExistingAddresses = _dbContext.Addresses.Any(a => a.CustomerId == customerId);
-        
-        bool shouldBeDefault = !hasExistingAddresses || dto.IsDefault;
-
-        if (shouldBeDefault && hasExistingAddresses)
-        {
-            var existingDefault = _dbContext.Addresses.FirstOrDefault(a => a.CustomerId == customerId && a.IsDefault);
-            if (existingDefault != null)
-            {
-                existingDefault.IsDefault = false;
-            }
-        }
-
         var address = new Address
         {
             CustomerId = customerId,
             Street = dto.Street,
             City = dto.City,
-            ZipCode = dto.ZipCode,
-            IsDefault = shouldBeDefault
+            ZipCode = dto.ZipCode
         };
 
         _dbContext.Addresses.Add(address);
@@ -144,7 +130,6 @@ public class CustomerService : ICustomerService
         CustomerId = a.CustomerId,
         Street = a.Street,
         City = a.City,
-        ZipCode = a.ZipCode,
-        IsDefault = a.IsDefault
+        ZipCode = a.ZipCode
     };
 }

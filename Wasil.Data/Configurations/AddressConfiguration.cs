@@ -16,18 +16,11 @@ public class AddressConfiguration : IEntityTypeConfiguration<Address>
         builder.Property(a => a.Street).HasMaxLength(255).IsRequired();
         builder.Property(a => a.City).HasMaxLength(100).IsRequired();
         builder.Property(a => a.ZipCode).HasMaxLength(20).IsRequired();
-        builder.Property(a => a.IsDefault).IsRequired();
         builder.Property(a => a.CustomerId).HasColumnName("customerId");
 
-        // Relationships
         builder.HasOne(a => a.Customer)
                .WithMany(c => c.Addresses)
                .HasForeignKey(a => a.CustomerId)
                .OnDelete(DeleteBehavior.Restrict);
-
-        // Business Rule: exactly one can be the default per customer
-        builder.HasIndex(a => new { a.CustomerId, a.IsDefault })
-               .IsUnique()
-               .HasFilter("[IsDefault] = 1");
     }
 }

@@ -18,7 +18,6 @@ public class OrderStatusHistoryConfiguration : IEntityTypeConfiguration<OrderSta
         builder.Property(osh => osh.TimestampUtc).IsRequired();
         builder.Property(osh => osh.OrderId).HasColumnName("orderId");
 
-        // Relationships
         builder.HasOne(osh => osh.Order)
                .WithMany(o => o.StatusHistories)
                .HasForeignKey(osh => osh.OrderId)

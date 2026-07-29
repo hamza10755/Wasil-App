@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Wasil.Data.Entities;
+using Wasil.Data.Enums;
 using Wasil.Service.Interfaces;
 using Wasil.Service.DTOs;
 using Wasil.Service.DTOs.Shared;
@@ -15,6 +18,16 @@ public class OrderService : IOrderService
     private readonly ILogger<OrderService> _logger;
     
     private static int _orderCounter = 0;
+
+    private static readonly Dictionary<OrderStatus, List<OrderStatus>> AllowedTransitions = new()
+    {
+        { OrderStatus.Pending, new() { OrderStatus.Accepted, OrderStatus.Cancelled } },
+        { OrderStatus.Accepted, new() { OrderStatus.Preparing, OrderStatus.Cancelled } },
+        { OrderStatus.Preparing, new() { OrderStatus.OutForDelivery } },
+        { OrderStatus.OutForDelivery, new() { OrderStatus.Delivered } },
+        { OrderStatus.Delivered, new() },
+        { OrderStatus.Cancelled, new() }
+    };
 
     public OrderService(WasilDbContext dbContext, ILogger<OrderService> logger)
     {
@@ -39,41 +52,130 @@ public class OrderService : IOrderService
     public Order PlaceOrder(CreateOrderDto dto)
     {
         _logger.LogInformation("Attempting to place order for Customer {CustomerId} at Store {StoreId}.", dto.CustomerId, dto.StoreId);
-        int maxRetries = 3;
 
-        for (int i = 0; i < maxRetries; i++)
+        if (dto.Lines == null || !dto.Lines.Any())
         {
-            var code = Generate12DigitOrderCode();
-            try
-            {
-                var newOrder = new Order
-                {
-                    OrderCode = code,
-                    StoreId = dto.StoreId,
-                    CustomerId = dto.CustomerId
-                };
-
-                _dbContext.Orders.Add(newOrder);
-                _dbContext.SaveChanges(); 
-
-                _logger.LogInformation("Successfully placed Order ID {OrderId} with Code {OrderCode}.", newOrder.Id, newOrder.OrderCode);
-                return newOrder;
-            }
-            catch (DbUpdateException ex)
-            {
-                _logger.LogWarning(ex, "Unique constraint collision or error placing order with code {OrderCode}. Attempt {Attempt} of {MaxRetries}.", code, i + 1, maxRetries);
-                
-                if (i == maxRetries - 1)
-                {
-                    _logger.LogError("Failed to place order after {MaxRetries} attempts due to database exception.", maxRetries);
-                    throw;
-                }
-                
-                _dbContext.ChangeTracker.Clear();
-            }
+            throw new ArgumentException("Order must contain at least one line.");
         }
 
-        throw new Exception("Failed to generate a unique order code.");
+        using var transaction = _dbContext.Database.BeginTransaction();
+        try
+        {
+            var customerExists = _dbContext.Customers.Any(c => c.Id == dto.CustomerId);
+            if (!customerExists)
+                throw new ArgumentException($"Customer with ID {dto.CustomerId} does not exist.");
+
+            var storeExists = _dbContext.Stores.Any(s => s.Id == dto.StoreId);
+            if (!storeExists)
+                throw new ArgumentException($"Store with ID {dto.StoreId} does not exist.");
+
+            var address = _dbContext.Addresses.FirstOrDefault(a => a.Id == dto.AddressId && a.CustomerId == dto.CustomerId);
+            if (address == null)
+                throw new ArgumentException($"Address with ID {dto.AddressId} does not belong to Customer {dto.CustomerId}.");
+
+            var productIds = dto.Lines.Select(l => l.ProductId).Distinct().ToList();
+            var products = _dbContext.Products
+                .Where(p => productIds.Contains(p.Id))
+                .ToDictionary(p => p.Id);
+
+            decimal subtotal = 0;
+            var orderLines = new List<OrderLine>();
+
+            foreach (var lineDto in dto.Lines)
+            {
+                if (!products.TryGetValue(lineDto.ProductId, out var product))
+                {
+                    throw new ArgumentException($"Product with ID {lineDto.ProductId} does not exist.");
+                }
+
+                if (product.IsDeleted)
+                {
+                    throw new InvalidOperationException($"Product '{product.Name}' is deleted and cannot be ordered.");
+                }
+
+                if (product.StoreId != dto.StoreId)
+                {
+                    throw new ArgumentException($"Product '{product.Name}' (ID {product.Id}) does not belong to Store {dto.StoreId}.");
+                }
+
+                if (product.StockQuantity < lineDto.Quantity)
+                {
+                    throw new InvalidOperationException($"Insufficient stock for product '{product.Name}'. Requested: {lineDto.Quantity}, Available: {product.StockQuantity}.");
+                }
+
+                product.StockQuantity -= lineDto.Quantity;
+
+                var lineTotal = product.Price * lineDto.Quantity;
+                subtotal += lineTotal;
+
+                orderLines.Add(new OrderLine
+                {
+                    ProductId = product.Id,
+                    ProductName = product.Name ?? "Unknown Product",
+                    UnitPrice = product.Price,
+                    Quantity = lineDto.Quantity,
+                    TotalPrice = lineTotal
+                });
+            }
+
+            decimal deliveryFee = 3.00m;
+            decimal total = subtotal + deliveryFee;
+
+            string code = string.Empty;
+            int maxRetries = 3;
+            bool saved = false;
+            Order? newOrder = null;
+
+            for (int i = 0; i < maxRetries && !saved; i++)
+            {
+                code = Generate12DigitOrderCode();
+                if (!_dbContext.Orders.Any(o => o.OrderCode == code))
+                {
+                    newOrder = new Order
+                    {
+                        OrderCode = code,
+                        CustomerId = dto.CustomerId,
+                        StoreId = dto.StoreId,
+                        PaymentMethod = dto.PaymentMethod,
+                        Subtotal = subtotal,
+                        DeliveryFee = deliveryFee,
+                        Total = total,
+                        Status = OrderStatus.Pending,
+                        OrderLines = orderLines
+                    };
+
+                    _dbContext.Orders.Add(newOrder);
+                    _dbContext.SaveChanges();
+                    saved = true;
+                }
+            }
+
+            if (!saved || newOrder == null)
+            {
+                throw new Exception("Failed to generate a unique order code after maximum retries.");
+            }
+
+            var history = new OrderStatusHistory
+            {
+                OrderId = newOrder.Id,
+                OldStatus = OrderStatus.Pending.ToString(),
+                NewStatus = OrderStatus.Pending.ToString(),
+                TimestampUtc = DateTime.UtcNow
+            };
+            _dbContext.OrderStatusHistories.Add(history);
+            _dbContext.SaveChanges();
+
+            transaction.Commit();
+
+            _logger.LogInformation("Successfully placed Order ID {OrderId} with Code {OrderCode}.", newOrder.Id, newOrder.OrderCode);
+            return newOrder;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error placing order. Transaction rolled back.");
+            transaction.Rollback();
+            throw;
+        }
     }
 
     public OrderDetailDto GetOrderDetails(int orderId)
@@ -89,11 +191,13 @@ public class OrderService : IOrderService
         if (order == null)
             throw new KeyNotFoundException($"Order with ID {orderId} not found.");
 
-        var defaultAddress = order.Customer.Addresses.FirstOrDefault(a => a.IsDefault);
-        var deliveryAddress = defaultAddress != null 
-            ? $"{defaultAddress.Street}, {defaultAddress.City}, {defaultAddress.ZipCode}" 
-            : "N/A";
-
+        var firstAddress = order.Customer.Addresses.FirstOrDefault();
+        string deliveryAddress;
+        if (firstAddress != null)
+            deliveryAddress = $"{firstAddress.Street}, {firstAddress.City}, {firstAddress.ZipCode}";
+        else
+            deliveryAddress = "N/A";
+        
         return new OrderDetailDto
         {
             Id = order.Id,
@@ -105,7 +209,7 @@ public class OrderService : IOrderService
             Total = order.Total,
             CreatedAtUtc = order.CreatedAtUtc,
             CustomerName = $"{order.Customer.FirstName} {order.Customer.LastName}",
-            StoreName = order.Store.StoreName,
+            StoreName = order.Store.StoreName ?? string.Empty,
             DeliveryAddress = deliveryAddress,
             Lines = order.OrderLines.Select(ol => new OrderLineDetailDto
             {
@@ -127,8 +231,10 @@ public class OrderService : IOrderService
 
     public PagedResultDto<CustomerOrderHistoryDto> GetCustomerOrderHistory(int customerId, int page, int pageSize)
     {
-        if (page < 1) page = 1;
-        if (pageSize < 1) pageSize = 10;
+        if (page < 1)
+            page = 1;
+        if (pageSize < 1)
+            pageSize = 10;
 
         var query = _dbContext.Orders
             .Where(o => o.CustomerId == customerId);
@@ -146,7 +252,7 @@ public class OrderService : IOrderService
                 OrderCode = o.OrderCode,
                 Date = o.CreatedAtUtc,
                 Status = o.Status.ToString(),
-                StoreName = o.Store.StoreName,
+                StoreName = o.Store.StoreName ?? string.Empty,
                 LineCount = o.OrderLines.Count,
                 Total = o.Total
             })
@@ -158,6 +264,137 @@ public class OrderService : IOrderService
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize
+        };
+    }
+
+    public void UpdateOrderStatus(int orderId, OrderStatus newStatus)
+    {
+        using var transaction = _dbContext.Database.BeginTransaction();
+        try
+        {
+            var order = _dbContext.Orders
+                .Include(o => o.OrderLines)
+                .ThenInclude(ol => ol.Product)
+                .FirstOrDefault(o => o.Id == orderId);
+
+            if (order == null)
+            {
+                throw new KeyNotFoundException($"Order with ID {orderId} not found.");
+            }
+
+            var currentStatus = order.Status;
+
+            if (!AllowedTransitions.TryGetValue(currentStatus, out var allowed) || !allowed.Contains(newStatus))
+            {
+                string allowedList;
+                if (allowed != null && allowed.Count > 0)
+                {
+                    allowedList = string.Join(", ", allowed.Select(a => a.ToString()));
+                }
+                else
+                {
+                    allowedList = "None";
+                }
+                throw new InvalidOperationException($"Illegal order status transition from '{currentStatus}' to '{newStatus}'. Allowed transitions: {allowedList}.");
+            }
+
+            if (newStatus == OrderStatus.Cancelled)
+            {
+                foreach (var line in order.OrderLines)
+                {
+                    if (line.Product != null)
+                    {
+                        line.Product.StockQuantity += line.Quantity;
+                    }
+                }
+            }
+
+            order.Status = newStatus;
+
+            var history = new OrderStatusHistory
+            {
+                OrderId = order.Id,
+                OldStatus = currentStatus.ToString(),
+                NewStatus = newStatus.ToString(),
+                TimestampUtc = DateTime.UtcNow
+            };
+            _dbContext.OrderStatusHistories.Add(history);
+            _dbContext.SaveChanges();
+
+            transaction.Commit();
+            _logger.LogInformation("Order {OrderId} status successfully updated to {Status}.", orderId, newStatus);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating status for Order {OrderId}.", orderId);
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    public StoreDashboardDto GetStoreDashboard(int storeId)
+    {
+        var storeExists = _dbContext.Stores.Any(s => s.Id == storeId);
+        if (!storeExists)
+        {
+            throw new KeyNotFoundException($"Store with ID {storeId} not found.");
+        }
+
+        var utcNow = DateTime.UtcNow;
+        var todayUtc = new DateTime(utcNow.Year, utcNow.Month, utcNow.Day, 0, 0, 0, DateTimeKind.Utc);
+        var thirtyDaysAgoUtc = utcNow.AddDays(-30);
+
+        var ordersQuery = _dbContext.Orders
+            .Where(o => o.StoreId == storeId);
+
+        var todayStats = ordersQuery
+            .Where(o => o.CreatedAtUtc >= todayUtc && o.Status != OrderStatus.Cancelled)
+            .GroupBy(o => 1)
+            .Select(g => new { Count = g.Count(), Revenue = g.Sum(o => o.Total) })
+            .FirstOrDefault();
+
+        var last30DaysStats = ordersQuery
+            .Where(o => o.CreatedAtUtc >= thirtyDaysAgoUtc && o.Status != OrderStatus.Cancelled)
+            .GroupBy(o => 1)
+            .Select(g => new { AvgValue = g.Average(o => o.Total) })
+            .FirstOrDefault();
+
+        var topProducts = _dbContext.OrderLines
+            .Where(ol => ol.Order.StoreId == storeId && ol.Order.CreatedAtUtc >= thirtyDaysAgoUtc && ol.Order.Status != OrderStatus.Cancelled)
+            .GroupBy(ol => new { ol.ProductId, ol.ProductName })
+            .Select(g => new TopProductDto
+            {
+                ProductId = g.Key.ProductId,
+                ProductName = g.Key.ProductName,
+                QuantitySold = g.Sum(ol => ol.Quantity)
+            })
+            .OrderByDescending(tp => tp.QuantitySold)
+            .Take(5)
+            .ToList();
+
+        var activeStatuses = new[] { OrderStatus.Pending, OrderStatus.Accepted, OrderStatus.Preparing, OrderStatus.OutForDelivery };
+        var activeCounts = ordersQuery
+            .Where(o => activeStatuses.Contains(o.Status))
+            .GroupBy(o => o.Status)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToDictionary(x => x.Status.ToString(), x => x.Count);
+
+        foreach (var status in activeStatuses)
+        {
+            var key = status.ToString();
+            if (!activeCounts.ContainsKey(key))
+            {
+                activeCounts[key] = 0;
+            }
+        }
+
+        return new StoreDashboardDto
+        {
+            TodayOrderCount = todayStats?.Count ?? 0,
+            TodayRevenue = todayStats?.Revenue ?? 0,
+            AvgOrderValueLast30Days = last30DaysStats?.AvgValue ?? 0,
+            TopProductsLast30Days = topProducts,
+            ActiveStatusCounts = activeCounts
         };
     }
 }

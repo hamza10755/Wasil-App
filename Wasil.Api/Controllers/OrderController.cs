@@ -1,6 +1,8 @@
+using System;
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
+using Wasil.Data.Enums;
 using Wasil.Service.DTOs;
-using Wasil.Service.DTOs.Shared;
 using Wasil.Service.Interfaces;
 
 namespace Wasil.Api.Controllers;
@@ -19,8 +21,19 @@ public class OrderController : ControllerBase
     [HttpPost]
     public IActionResult PlaceOrder([FromBody] CreateOrderDto dto)
     {
-        var newOrder = _orderService.PlaceOrder(dto);
-        return Ok(newOrder);
+        try
+        {
+            var newOrder = _orderService.PlaceOrder(dto);
+            return StatusCode(201, newOrder);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
     }
 
     [HttpGet("{id:int}")]
@@ -31,9 +44,9 @@ public class OrderController : ControllerBase
             var details = _orderService.GetOrderDetails(id);
             return Ok(details);
         }
-        catch (System.Collections.Generic.KeyNotFoundException)
+        catch (KeyNotFoundException ex)
         {
-            return NotFound($"Order with ID {id} not found.");
+            return NotFound(new { error = ex.Message });
         }
     }
 
@@ -43,4 +56,45 @@ public class OrderController : ControllerBase
         var history = _orderService.GetCustomerOrderHistory(customerId, page, pageSize);
         return Ok(history);
     }
+
+    [HttpPut("{id:int}/status")]
+    public IActionResult UpdateOrderStatus(int id, [FromBody] UpdateOrderStatusRequest request)
+    {
+        try
+        {
+            _orderService.UpdateOrderStatus(id, request.Status);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpGet("dashboard/{storeId:int}")]
+    public IActionResult GetStoreDashboard(int storeId)
+    {
+        try
+        {
+            var dashboard = _orderService.GetStoreDashboard(storeId);
+            return Ok(dashboard);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+    }
+}
+
+public class UpdateOrderStatusRequest
+{
+    public OrderStatus Status { get; set; }
 }

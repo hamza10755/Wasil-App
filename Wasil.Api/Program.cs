@@ -3,6 +3,7 @@ using Wasil.Data.Entities;
 using Wasil.Data.Interceptors;
 using Wasil.Service.Interfaces;
 using Wasil.Service.Services;
+using Wasil.Api.Middleware;
 
 using Serilog;
 
@@ -11,7 +12,15 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog((context, configuration) => 
     configuration.ReadFrom.Configuration(context.Configuration));
 
-builder.Services.AddControllers();
+builder.Services.AddControllers().AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+});
+
+builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
+{
+    options.SerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+});
 
 builder.Services.AddDbContext<WasilDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
@@ -24,9 +33,13 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<ICustomerService, CustomerService>();
+builder.Services.AddScoped<ICatalogService, CatalogService>();
 builder.Services.AddScoped<DatabaseSeeder>();
 
 var app = builder.Build();
+
+// Enable Global Exception Middleware
+app.UseMiddleware<GlobalExceptionMiddleware>();
 
 if (args.Contains("--reseed"))
 {
@@ -83,4 +96,3 @@ app.MapGet("/api/test/counts", (WasilDbContext db) => new
 app.MapControllers();
 
 app.Run();
-
