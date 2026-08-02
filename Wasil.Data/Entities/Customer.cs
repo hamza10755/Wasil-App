@@ -1,11 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Wasil.Data.Entities;
 
-public partial class Customer
+public partial class Customer: BaseEntity
 {
-    public int CustomerId { get; set; }
 
     public string? PhoneNumber { get; set; }
 
@@ -17,5 +16,9 @@ public partial class Customer
 
     public string? Location { get; set; }
 
+    public string Email { get; set; } = null!;
+
     public virtual ICollection<Order> Orders { get; set; } = new List<Order>();
+
+    public virtual ICollection<Address> Addresses { get; set; } = new List<Address>();
 }

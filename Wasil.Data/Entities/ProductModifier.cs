@@ -3,9 +3,8 @@ using System.Collections.Generic;
 
 namespace Wasil.Data.Entities;
 
-public partial class ProductModifier
+public partial class ProductModifier : BaseEntity
 {
-    public int ModifierId { get; set; }
 
     public int? ProductId { get; set; }
 

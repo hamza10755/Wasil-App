@@ -3,9 +3,8 @@ using System.Collections.Generic;
 
 namespace Wasil.Data.Entities;
 
-public partial class OrderLineModifier
+public partial class OrderLineModifier : BaseEntity
 {
-    public int ModifierId { get; set; }
 
     public string? ModifierName { get; set; }
 

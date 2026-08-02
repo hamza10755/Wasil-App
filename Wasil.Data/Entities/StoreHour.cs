@@ -3,9 +3,8 @@ using System.Collections.Generic;
 
 namespace Wasil.Data.Entities;
 
-public partial class StoreHour
+public partial class StoreHour : BaseEntity
 {
-    public int HourId { get; set; }
 
     public int? StoreId { get; set; }
 

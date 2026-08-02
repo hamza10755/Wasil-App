@@ -3,9 +3,8 @@ using System.Collections.Generic;
 
 namespace Wasil.Data.Entities;
 
-public partial class Break
+public partial class Break : BaseEntity
 {
-    public int BreakId { get; set; }
 
     public int? HourId { get; set; }
 
