@@ -47,10 +47,6 @@ public class GlobalExceptionMiddleware
                 statusCode = HttpStatusCode.NotFound;
                 message = exception.Message;
                 break;
-            case InvalidOperationException:
-                statusCode = HttpStatusCode.Conflict;
-                message = exception.Message;
-                break;
         }
 
         if (statusCode == HttpStatusCode.InternalServerError)

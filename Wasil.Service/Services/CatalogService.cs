@@ -24,7 +24,7 @@ public class CatalogService : ICatalogService
         if (pageSize < 1)
             pageSize = 10;
 
-        var query = _dbContext.Stores.AsQueryable();
+        var query = _dbContext.Stores.AsQueryable().IgnoreQueryFilters();
 
         if (!string.IsNullOrWhiteSpace(name))
         {

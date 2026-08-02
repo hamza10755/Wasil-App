@@ -37,7 +37,9 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =
 });
 
 builder.Services.AddDbContext<WasilDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
+    options.UseSqlServer(
+               builder.Configuration.GetConnectionString("DefaultConnection"),
+               sqlOptions => sqlOptions.EnableRetryOnFailure())
            .AddInterceptors(new AuditInterceptor()));
 
 builder.Services.AddEndpointsApiExplorer();
@@ -52,6 +54,12 @@ builder.Services.AddScoped<ICatalogService, CatalogService>();
 builder.Services.AddScoped<DatabaseSeeder>();
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<WasilDbContext>();
+    dbContext.Database.Migrate();
+}
 
 // Enable Global Exception Middleware
 app.UseMiddleware<GlobalExceptionMiddleware>();
