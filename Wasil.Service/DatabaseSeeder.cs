@@ -8,41 +8,19 @@ using Wasil.Data.Entities;
 using Wasil.Data.Enums;
 using Wasil.Data.Interceptors;
 using EFCore.BulkExtensions;
+using Microsoft.AspNetCore.Identity;
 
 namespace Wasil.Service.Services;
 
 public class DatabaseSeeder
 {
     private readonly WasilDbContext _context;
+    private readonly IPasswordHasher<User> _passwordHasher;
 
-    public DatabaseSeeder(WasilDbContext context)
+    public DatabaseSeeder(WasilDbContext context, IPasswordHasher<User> passwordHasher)
     {
         _context = context;
-    }
-
-    public void SeedAll()
-    {
-        var stopwatch = Stopwatch.StartNew();
-        Console.WriteLine("=== Starting Database Seeding ===");
-
-        AuditInterceptor.AuditLoggingEnabled = false;
-
-        try
-        {
-            var stores = SeedStores(50);
-
-            var categories = SeedCategories(30);
-
-            SeedProducts(stores, categories, 40000);
-
-            var customers = SeedCustomers(20000);
-        }
-        finally
-        {
-            AuditInterceptor.AuditLoggingEnabled = true;
-            stopwatch.Stop();
-            Console.WriteLine($"=== Seeding Completed in {stopwatch.Elapsed.TotalMinutes:F2} minutes ===");
-        }
+        _passwordHasher = passwordHasher;
     }
 
     private List<Store> SeedStores(int count)
@@ -115,23 +93,96 @@ public class DatabaseSeeder
     private List<Customer> SeedCustomers(int count)
     {
         var sw = Stopwatch.StartNew();
-        var customers = new List<Customer>();
+        var allCustomers = new List<Customer>();
         
         int chunkSize = 5000;
         for (int i = 0; i < count; i += chunkSize)
         {
-            var faker = new Faker<Customer>()
-                .RuleFor(c => c.FirstName, f => f.Name.FirstName())
-                .RuleFor(c => c.LastName, f => f.Name.LastName())
-                .RuleFor(c => c.Email, (f, c) => f.Internet.Email(c.FirstName, c.LastName + f.UniqueIndex))
-                .RuleFor(c => c.PhoneNumber, f => f.Phone.PhoneNumber("079#######"))
-                .RuleFor(c => c.CreatedAtUtc, f => f.Date.Past(1));
+            int currentBatchSize = Math.Min(chunkSize, count - i);
+            var usersBatch = new List<User>(currentBatchSize);
+            var customersBatch = new List<Customer>(currentBatchSize);
 
-            var batch = faker.Generate(Math.Min(chunkSize, count - i));
-            _context.BulkInsert(batch);
+            for (int j = 0; j < currentBatchSize; j++)
+            {
+                var userId = Guid.NewGuid();
+                var firstName = new Faker().Name.FirstName();
+                var lastName = new Faker().Name.LastName();
+                var uniquePhone = "079" + new Faker().Random.Number(1000000, 9999999);
+                var uniqueEmail = $"{firstName.ToLower()}_{lastName.ToLower()}_{Guid.NewGuid().ToString().Substring(0, 4)}@example.com";
+
+                var user = new User
+                {
+                    Id = userId,
+                    Phone = uniquePhone,
+                    Email = uniqueEmail,
+                    Role = Role.Customer,
+                    PasswordHash = null,
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+                usersBatch.Add(user);
+
+                var customer = new Customer
+                {
+                    UserId = userId,
+                    FirstName = firstName,
+                    LastName = lastName,
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+                customersBatch.Add(customer);
+            }
+
+            _context.BulkInsert(usersBatch);
+            
+            _context.BulkInsert(customersBatch);
+            
+            allCustomers.AddRange(customersBatch);
         }
 
-        Console.WriteLine($"Seeded {count} Customers in {sw.ElapsedMilliseconds}ms");
-        return customers;
+        Console.WriteLine($"Seeded {count} Users and Customers in {sw.ElapsedMilliseconds}ms");
+        return allCustomers;
+    }
+    public void SeedAdminUser()
+    {
+        if (_context.Users.Any(u => u.Role == Role.Admin))
+        {
+            return;
+        }
+
+        var admin = new User
+        {
+            Id = Guid.NewGuid(),
+            Email = "admin@wasil.com",
+            Role = Role.Admin,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        admin.PasswordHash = _passwordHasher.HashPassword(admin, "AdminSecurePassword123!");
+
+        _context.Users.Add(admin);
+        _context.SaveChanges();
+        Console.WriteLine("Seeded Default Admin User (admin@wasil.com).");
+    }
+    public void SeedAll()
+    {
+        var stopwatch = Stopwatch.StartNew();
+        Console.WriteLine("=== Starting Database Seeding ===");
+
+        AuditInterceptor.AuditLoggingEnabled = false;
+
+        try
+        {
+            SeedAdminUser();
+
+            var stores = SeedStores(50);
+            var categories = SeedCategories(30);
+            SeedProducts(stores, categories, 40000);
+            var customers = SeedCustomers(20000);
+        }
+        finally
+        {
+            AuditInterceptor.AuditLoggingEnabled = true;
+            stopwatch.Stop();
+            Console.WriteLine($"=== Seeding Completed in {stopwatch.Elapsed.TotalMinutes:F2} minutes ===");
+        }
     }
 }

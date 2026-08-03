@@ -15,6 +15,8 @@ public partial class WasilDbContext : DbContext
 
     public virtual DbSet<Customer> Customers { get; set; }
 
+    public virtual DbSet<User> Users { get; set; }
+
     public virtual DbSet<Driver> Drivers { get; set; }
 
     public virtual DbSet<Occasion> Occasions { get; set; }
