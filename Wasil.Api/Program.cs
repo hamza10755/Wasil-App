@@ -68,6 +68,8 @@ builder.Services.AddAuthentication(options =>
 });
 
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddMemoryCache();
 
 builder.Services.AddAuthorization();
 

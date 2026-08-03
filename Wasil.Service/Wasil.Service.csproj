@@ -8,6 +8,7 @@
     <PackageReference Include="Bogus" Version="35.6.5" />
     <PackageReference Include="EFCore.BulkExtensions" Version="10.0.1" />
     <PackageReference Include="FluentValidation" Version="12.1.1" />
+    <PackageReference Include="Twilio" Version="7.14.9" />
   </ItemGroup>
 
   <PropertyGroup>
