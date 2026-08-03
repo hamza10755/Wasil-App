@@ -43,6 +43,8 @@ public partial class WasilDbContext : DbContext
 
     public virtual DbSet<OrderStatusHistory> OrderStatusHistories { get; set; }
 
+    public virtual DbSet<RefreshToken> RefreshTokens { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WasilDbContext).Assembly);
