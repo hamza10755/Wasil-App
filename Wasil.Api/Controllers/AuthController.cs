@@ -74,7 +74,6 @@ public class AuthController : ControllerBase
             var customerProfile = new Customer
             {
                 UserId = user.Id,
-                Email = $"{request.Phone}@wasil.com", // Set default email to avoid NULL constraint validation error
                 CreatedAtUtc = DateTime.UtcNow
             };
 
@@ -87,7 +86,7 @@ public class AuthController : ControllerBase
         
         _logger.LogInformation("OTP for {Phone} is {OTP}", request.Phone, mockOtp);
 
-        return Ok(new { message = "OTP sent successfully. (Check console for mock code)" });
+        return Ok(new { message = "OTP sent successfully.", otp = mockOtp });
     }
 
     [HttpPost("customer/verify-otp")]
@@ -119,7 +118,7 @@ public class AuthController : ControllerBase
                            ?? principal.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub);
 
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out Guid userId))
-            {
+            { 
                 return BadRequest(new { message = "Invalid token claims." });
             }
 
@@ -203,16 +202,18 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> Me()
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier) 
-                       ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub);
+                    ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub);
 
-        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out Guid userId))
+        if (userIdClaim == null || string.IsNullOrEmpty(userIdClaim.Value))
         {
             return Unauthorized();
         }
 
+        var userId = userIdClaim.Value;
+
         var user = await _context.Users
             .Include(u => u.Customer)
-            .FirstOrDefaultAsync(u => u.Id == userId);
+            .FirstOrDefaultAsync(u => u.Id.ToString() == userId);
 
         if (user == null)
         {

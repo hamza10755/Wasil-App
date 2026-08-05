@@ -20,7 +20,7 @@ public class CustomerService : ICustomerService
 
     public CustomerDto CreateCustomer(CreateCustomerDto dto)
     {
-        if (_dbContext.Customers.Any(c => c.Email == dto.Email))
+        if (!string.IsNullOrEmpty(dto.Email) && _dbContext.Customers.Any(c => c.Email == dto.Email))
             throw new InvalidOperationException("Email already exists.");
 
         var customer = new Customer
@@ -45,7 +45,7 @@ public class CustomerService : ICustomerService
         if (customer == null)
             throw new KeyNotFoundException($"Customer with ID {id} not found.");
 
-        if (_dbContext.Customers.Any(c => c.Email == dto.Email && c.Id != id))
+        if (!string.IsNullOrEmpty(dto.Email) && _dbContext.Customers.Any(c => c.Email == dto.Email && c.Id != id))
             throw new InvalidOperationException("Email is already used by another customer.");
 
         customer.FirstName = dto.FirstName;

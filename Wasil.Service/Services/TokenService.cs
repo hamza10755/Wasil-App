@@ -27,17 +27,18 @@ public class TokenService : ITokenService
 
         var claims = new List<Claim>
         {
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new Claim(ClaimTypes.Role, user.Role.ToString())
         };
 
-        if (!string.IsNullOrEmpty(user.Email))
-            claims.Add(new Claim(JwtRegisteredClaimNames.Email, user.Email));
-        if (!string.IsNullOrEmpty(user.Phone))
-            claims.Add(new Claim("phone", user.Phone));
+        // if (!string.IsNullOrEmpty(user.Email))
+        //     claims.Add(new Claim(JwtRegisteredClaimNames.Email, user.Email));
+        // if (!string.IsNullOrEmpty(user.Phone))
+        //     claims.Add(new Claim("phone", user.Phone));
             
-        if (user.StoreId.HasValue)
-            claims.Add(new Claim("storeId", user.StoreId.Value.ToString()));
+        // if (user.StoreId.HasValue)
+        //     claims.Add(new Claim("storeId", user.StoreId.Value.ToString()));
 
         var token = new JwtSecurityToken(
             issuer: _configuration["Jwt:Issuer"],

@@ -19,11 +19,11 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         
         builder.Property(c => c.Email)
                .HasColumnName("email")
-               .HasMaxLength(150)
-               .IsRequired();
+               .HasMaxLength(150);
                
         builder.HasIndex(c => c.Email)
-               .IsUnique();
+               .IsUnique()
+               .HasFilter("[email] IS NOT NULL");
 
         builder.HasMany(c => c.Addresses)
                .WithOne(a => a.Customer)
