@@ -1,4 +1,4 @@
-namespace Wasil.Data.Interfaces;
+namespace Wasil.Service.Interfaces;
 
 
 public interface IAuthPolicyService
