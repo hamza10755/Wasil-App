@@ -1,13 +1,18 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Wasil.Data\Wasil.Data.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Bogus" Version="35.6.5" />
     <PackageReference Include="EFCore.BulkExtensions" Version="10.0.1" />
     <PackageReference Include="FluentValidation" Version="12.1.1" />
+    <PackageReference Include="Twilio" Version="7.14.9" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -16,8 +16,12 @@ public partial class Customer: BaseEntity
 
     public string? Location { get; set; }
 
-    public string Email { get; set; } = null!;
+    public string? Email { get; set; }
 
+    public Guid UserId { get; set; }
+
+    public virtual User User { get; set; } = null!;
+    
     public virtual ICollection<Order> Orders { get; set; } = new List<Order>();
 
     public virtual ICollection<Address> Addresses { get; set; } = new List<Address>();

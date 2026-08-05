@@ -7,6 +7,8 @@ using Wasil.Data.Entities;
 using Wasil.Service.DTOs;
 using Wasil.Service.Interfaces;
 
+using Wasil.Data.Enums;
+
 namespace Wasil.Service.Services;
 
 public class CustomerService : ICustomerService
@@ -20,19 +22,32 @@ public class CustomerService : ICustomerService
 
     public CustomerDto CreateCustomer(CreateCustomerDto dto)
     {
-        if (_dbContext.Customers.Any(c => c.Email == dto.Email))
+        if (!string.IsNullOrEmpty(dto.Email) && _dbContext.Customers.Any(c => c.Email == dto.Email))
             throw new InvalidOperationException("Email already exists.");
+
+        var userId = Guid.NewGuid();
+        var user = new User
+        {
+            Id = userId,
+            Phone = dto.PhoneNumber,
+            Email = dto.Email,
+            Role = Role.Customer,
+            CreatedAtUtc = DateTime.UtcNow
+        };
 
         var customer = new Customer
         {
+            UserId = userId,
             FirstName = dto.FirstName,
             LastName = dto.LastName,
             Email = dto.Email,
             PhoneNumber = dto.PhoneNumber,
             Gender = dto.Gender,
-            Location = dto.Location
+            Location = dto.Location,
+            CreatedAtUtc = DateTime.UtcNow
         };
 
+        _dbContext.Users.Add(user);
         _dbContext.Customers.Add(customer);
         _dbContext.SaveChanges();
 
@@ -45,7 +60,7 @@ public class CustomerService : ICustomerService
         if (customer == null)
             throw new KeyNotFoundException($"Customer with ID {id} not found.");
 
-        if (_dbContext.Customers.Any(c => c.Email == dto.Email && c.Id != id))
+        if (!string.IsNullOrEmpty(dto.Email) && _dbContext.Customers.Any(c => c.Email == dto.Email && c.Id != id))
             throw new InvalidOperationException("Email is already used by another customer.");
 
         customer.FirstName = dto.FirstName;
