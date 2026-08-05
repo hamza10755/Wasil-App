@@ -2,6 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Wasil.Data;
 using Wasil.Data.Entities;
 using Wasil.Data.Interfaces;
+using Wasil.Service.Interfaces;
+
+namespace Wasil.Service.Services;
 
 public class AuthPolicyService : IAuthPolicyService
 {
