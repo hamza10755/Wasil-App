@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Wasil.Data.Entities;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Wasil.Data.Interceptors;
 
@@ -33,6 +34,29 @@ public class AuditInterceptor : SaveChangesInterceptor
     private static void UpdateEntitiesAndCreateAudit(DbContext? context)
     {
         if (context == null) return;
+
+        Guid? userId = null;
+        try
+        {
+            var serviceProvider = ((IInfrastructure<IServiceProvider>)context).Instance;
+            var currentUserType = Type.GetType("Wasil.Data.Interfaces.ICurrentUser, Wasil.Service");
+            if (currentUserType != null)
+            {
+                var currentUserService = serviceProvider.GetService(currentUserType);
+                if (currentUserService != null)
+                {
+                    var userIdProp = currentUserService.GetType().GetProperty("UserId");
+                    if (userIdProp != null)
+                    {
+                        userId = (Guid?)userIdProp.GetValue(currentUserService);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Fallback if the service cannot be resolved
+        }
 
         var currentTime = DateTime.UtcNow;
         var auditEntries = new List<AuditTrail>();
@@ -113,7 +137,7 @@ public class AuditInterceptor : SaveChangesInterceptor
                     Action = action,
                     ChangesJson = JsonSerializer.Serialize(changesDict),
                     TimestampUtc = currentTime,
-                    UserId = null
+                    UserId = userId
                 });
             }
         }

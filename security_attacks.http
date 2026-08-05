@@ -1,0 +1,265 @@
+### WASIL SECURITY AND PENETRATION TESTING SCRIPT (PART 6)
+# Host Config
+@host = http://localhost:5247
+
+# Shared test variables (to be populated during test runs)
+@customerA_Token = Bearer CUSTOMER_A_JWT_HERE
+@customerB_Token = Bearer CUSTOMER_B_JWT_HERE
+@partnerStore1_Token = Bearer PARTNER_STORE1_JWT_HERE
+@partnerStore2_Token = Bearer PARTNER_STORE2_JWT_HERE
+@adminToken = Bearer ADMIN_JWT_HERE
+@garbageToken = Bearer abc.def.ghi
+@tamperedToken = Bearer TAMPERED_JWT_HERE
+
+# Target ID variables
+@customerAId = 1
+@customerBId = 2
+@store1Id = 1
+@store2Id = 2
+@orderFromStore1Id = 1
+@orderFromStore2Id = 2
+
+
+# ==============================================================================
+# SECTION 1: NO TOKEN & GARBAGE TOKEN ATTACKS (ATTACK #1 & #2)
+# ==============================================================================
+
+### Attack 1: Call protected Customer Update with NO TOKEN
+# Expected: 401 Unauthorized
+PUT {{host}}/api/v1/customers/{{customerAId}}
+Content-Type: application/json
+
+{
+  "firstName": "Hacker",
+  "lastName": "Man"
+}
+
+### Attack 2: Call protected Order Details with GARBAGE TOKEN
+# Expected: 401 Unauthorized
+GET {{host}}/api/v1/orders/{{orderFromStore1Id}}
+Authorization: {{garbageToken}}
+
+
+# ==============================================================================
+# SECTION 2: ENDPOINT-SPECIFIC ATTACKS & CROSS-TENANT BYPASS (ATTACK #3 & #4)
+# ==============================================================================
+
+# ----------------- CUSTOMER ENDPOINTS -----------------
+
+### Test: Public Customer Registration
+# Expected: 201 Created (No token needed)
+POST {{host}}/api/v1/customers
+Content-Type: application/json
+
+{
+  "firstName": "New",
+  "lastName": "Customer",
+  "email": "new.customer@wasil.com",
+  "phoneNumber": "0790000001"
+}
+
+### Attack 3.1: Customer A tries to update Customer B's profile
+# Expected: 403 Forbidden
+PUT {{host}}/api/v1/customers/{{customerBId}}
+Authorization: {{customerA_Token}}
+Content-Type: application/json
+
+{
+  "firstName": "Malicious",
+  "lastName": "Update"
+}
+
+### Attack 3.2: Customer A tries to list Customer B's addresses
+# Expected: 403 Forbidden
+GET {{host}}/api/v1/customers/{{customerBId}}/addresses
+Authorization: {{customerA_Token}}
+
+### Attack 3.3: Customer A tries to add an address to Customer B's account
+# Expected: 403 Forbidden
+POST {{host}}/api/v1/customers/{{customerBId}}/addresses
+Authorization: {{customerA_Token}}
+Content-Type: application/json
+
+{
+  "street": "Evil St",
+  "city": "Amman",
+  "zipCode": "666"
+}
+
+# ----------------- ORDER ENDPOINTS -----------------
+
+### Attack 3.4: Customer A tries to place an order under Customer B's ID
+# Expected: 403 Forbidden
+POST {{host}}/api/v1/orders
+Authorization: {{customerA_Token}}
+Content-Type: application/json
+
+{
+  "customerId": {{customerBId}},
+  "storeId": {{store1Id}},
+  "addressId": 1,
+  "paymentMethod": 0,
+  "lines": [
+    {
+      "productId": 1,
+      "quantity": 1
+    }
+  ]
+}
+
+### Attack 3.5: Customer A tries to view Customer B's order
+# Expected: 403 Forbidden
+GET {{host}}/api/v1/orders/{{orderFromStore2Id}}
+Authorization: {{customerA_Token}}
+
+### Attack 3.6: Customer A tries to view Customer B's order history endpoint
+# Expected: 403 Forbidden
+GET {{host}}/api/v1/orders/customer/{{customerBId}}
+Authorization: {{customerA_Token}}
+
+# ----------------- PARTNER ENDPOINTS -----------------
+
+### Attack 4.1: Partner of Store 1 tries to view order details for Store 2
+# Expected: 403 Forbidden
+GET {{host}}/api/v1/orders/{{orderFromStore2Id}}
+Authorization: {{partnerStore1_Token}}
+
+### Attack 4.2: Partner of Store 1 tries to update status of an order belonging to Store 2
+# Expected: 403 Forbidden
+PUT {{host}}/api/v1/orders/{{orderFromStore2Id}}/status
+Authorization: {{partnerStore1_Token}}
+Content-Type: application/json
+
+{
+  "status": 2
+}
+
+### Attack 4.3: Partner of Store 1 tries to view dashboard for Store 2
+# Expected: 403 Forbidden
+GET {{host}}/api/v1/orders/dashboard/{{store2Id}}
+Authorization: {{partnerStore1_Token}}
+
+### Attack 4.4: Partner tries to register a new Customer (Role bypass check)
+# Expected: 403 Forbidden (Partner role not allowed in [Authorize(Roles = "Admin, Customer")])
+POST {{host}}/api/v1/customers/{{customerAId}}/addresses
+Authorization: {{partnerStore1_Token}}
+Content-Type: application/json
+
+{
+  "street": "Partner St",
+  "city": "Amman",
+  "zipCode": "111"
+}
+
+
+# ==============================================================================
+# SECTION 3: SIGNATURE & CRYPTO ATTACKS (ATTACK #5 & #6)
+# ==============================================================================
+
+### Attack 5: Tampered Claim (e.g. changing role to Admin)
+# Expected: 401 Unauthorized (Signature verification fails)
+GET {{host}}/api/v1/orders/{{orderFromStore1Id}}
+Authorization: {{tamperedToken}}
+
+### Attack 6: alg: none attack (Simulated by sending header with alg: none and no signature)
+# Expected: 401 Unauthorized
+GET {{host}}/api/v1/orders/{{orderFromStore1Id}}
+Authorization: Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjEiLCJzdWIiOiIxIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiQWRtaW4ifQ.
+
+
+# ==============================================================================
+# SECTION 4: TOKENS, REFRESH ROTATION & LOGOUT (ATTACK #7 & #8)
+# ==============================================================================
+
+### Test: Success Case for token refresh (Rotate token)
+# Send expired Access Token + valid Refresh Token
+# Expected: 200 OK with new Access Token and new Refresh Token
+POST {{host}}/api/auth/refresh
+Content-Type: application/json
+
+{
+  "token": "REPLACE_WITH_EXPIRED_OR_VALID_ACCESS_TOKEN",
+  "refreshToken": "REPLACE_WITH_ACTIVE_REFRESH_TOKEN"
+}
+
+### Attack 8: Replaying the already rotated Refresh Token
+# Expected: 401 Unauthorized AND all active tokens for that user revoked
+POST {{host}}/api/auth/refresh
+Content-Type: application/json
+
+{
+  "token": "REPLACE_WITH_EXPIRED_OR_VALID_ACCESS_TOKEN",
+  "refreshToken": "REPLACE_WITH_ALREADY_ROTATED_REFRESH_TOKEN"
+}
+
+### Test: Logout endpoint
+# Expected: 200 OK (and invalidates all active refresh tokens for the user)
+POST {{host}}/api/auth/logout
+Authorization: {{customerA_Token}}
+
+
+# ==============================================================================
+# SECTION 5: OTP BRUTE-FORCE, REUSE & FLOODING (ATTACK #9, #10 & #11)
+# ==============================================================================
+
+### Test: Request OTP
+# Expected: 200 OK
+POST {{host}}/api/auth/customer/request-otp
+Content-Type: application/json
+
+{
+  "phone": "0791234567"
+}
+
+### Attack 9: Brute-forcing OTP verification (Wrong OTP code submission)
+# Expected: 401 Unauthorized (and must lock out/throttle after several attempts)
+POST {{host}}/api/auth/customer/verify-otp
+Content-Type: application/json
+
+{
+  "phone": "0791234567",
+  "code": "999999"
+}
+
+### Attack 10: Reusing a spent OTP (Verify once, then try to verify again)
+# Expected: 401 Unauthorized
+POST {{host}}/api/auth/customer/verify-otp
+Content-Type: application/json
+
+{
+  "phone": "0791234567",
+  "code": "123456"
+}
+
+### Attack 11: Flooding OTP Requests (Send rapidly in a loop)
+# Expected: 429 Too Many Requests (Rate limiter should trigger)
+POST {{host}}/api/auth/customer/request-otp
+Content-Type: application/json
+
+{
+  "phone": "0791234567"
+}
+
+
+# ==============================================================================
+# SECTION 6: INFORMATION DISCLOSURE & PROBING (ATTACK #12)
+# ==============================================================================
+
+### Attack 12.1: Probing Request OTP for non-existent vs existent user
+# Expected: Response details, timing, status codes, and message bodies must be identical.
+POST {{host}}/api/auth/customer/request-otp
+Content-Type: application/json
+
+{
+  "phone": "0799999999"
+}
+
+### Attack 12.2: Probing Staff Login for non-existent vs incorrect password
+# Expected: Must return identical response payload (e.g. 401 "Invalid email or password.")
+POST {{host}}/api/auth/staff/login
+Content-Type: application/json
+
+{
+  "email": "nonexistent@wasil.com",
+  "password": "wrongpassword"
+}

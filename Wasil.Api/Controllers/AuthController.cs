@@ -8,6 +8,9 @@ using Wasil.Data.Entities;
 using Wasil.Data.Enums;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using Wasil.Data.Interfaces;
+using Microsoft.Extensions.Caching.Memory;
+using System.Security.Cryptography;
 
 namespace Wasil.Api.Controllers;
 
@@ -19,17 +22,23 @@ public class AuthController : ControllerBase
     private readonly ITokenService _tokenService;
     private readonly IPasswordHasher<User> _passwordHasher;
     private readonly ILogger<AuthController> _logger;
+    private readonly ICurrentUser _currentUser;
+    private readonly IMemoryCache _cache;
 
     public AuthController(
         WasilDbContext context, 
         ITokenService tokenService, 
         IPasswordHasher<User> passwordHasher,
-        ILogger<AuthController> logger)
+        ILogger<AuthController> logger,
+        ICurrentUser currentUser,
+        IMemoryCache cache)
     {
         _context = context;
         _tokenService = tokenService;
         _passwordHasher = passwordHasher;
         _logger = logger;
+        _currentUser = currentUser;
+        _cache = cache;
     }
 
     [HttpPost("staff/login")]
@@ -59,6 +68,16 @@ public class AuthController : ControllerBase
     [HttpPost("customer/request-otp")]
     public async Task<IActionResult> RequestOtp([FromBody] CustomerOtpRequest request)
     {
+        var cacheKey = $"otp:{request.Phone}";
+        if (_cache.TryGetValue(cacheKey, out OtpDetails? existingOtp) && existingOtp != null)
+        {
+            var secondsSinceLastRequest = (DateTime.UtcNow - existingOtp.LastRequestedAtUtc).TotalSeconds;
+            if (secondsSinceLastRequest < 60)
+            {
+                return StatusCode(429, new { message = $"Please wait {60 - (int)secondsSinceLastRequest} seconds before requesting a new OTP." });
+            }
+        }
+
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Phone == request.Phone && u.Role == Role.Customer);
         
         if (user == null)
@@ -82,20 +101,52 @@ public class AuthController : ControllerBase
             await _context.SaveChangesAsync();
         }
 
-        var mockOtp = "123456"; 
-        
-        _logger.LogInformation("OTP for {Phone} is {OTP}", request.Phone, mockOtp);
+        var randomCode = RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
 
-        return Ok(new { message = "OTP sent successfully.", otp = mockOtp });
+        var otpDetails = new OtpDetails
+        {
+            Code = randomCode,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(3),
+            Attempts = 0,
+            LastRequestedAtUtc = DateTime.UtcNow
+        };
+
+        _cache.Set(cacheKey, otpDetails, TimeSpan.FromMinutes(5));
+
+        _logger.LogInformation("OTP for {Phone} is {OTP}", request.Phone, randomCode);
+
+        return Ok(new { message = "OTP sent successfully." });
     }
 
     [HttpPost("customer/verify-otp")]
     public async Task<IActionResult> VerifyOtp([FromBody] CustomerOtpVerifyRequest request)
     {
-        if (request.Code != "123456") 
+        var cacheKey = $"otp:{request.Phone}";
+        if (!_cache.TryGetValue(cacheKey, out OtpDetails? otpDetails) || otpDetails == null)
         {
             return Unauthorized(new { message = "Invalid or expired OTP." });
         }
+
+        if (DateTime.UtcNow > otpDetails.ExpiresAtUtc)
+        {
+            _cache.Remove(cacheKey);
+            return Unauthorized(new { message = "Invalid or expired OTP." });
+        }
+
+        if (otpDetails.Attempts >= 3)
+        {
+            _cache.Remove(cacheKey);
+            return StatusCode(429, new { message = "Too many failed attempts. Request a new OTP." });
+        }
+
+        if (otpDetails.Code != request.Code)
+        {
+            otpDetails.Attempts++;
+            _cache.Set(cacheKey, otpDetails, TimeSpan.FromMinutes(5));
+            return Unauthorized(new { message = "Invalid or expired OTP." });
+        }
+
+        _cache.Remove(cacheKey);
 
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Phone == request.Phone && u.Role == Role.Customer);
         
@@ -177,13 +228,12 @@ public class AuthController : ControllerBase
     [Authorize]
     public async Task<IActionResult> Logout()
     {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier) 
-                       ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub);
+        var userId = _currentUser.UserId;
 
-        if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out Guid userId))
+        if (userId.HasValue)
         {
             var activeTokens = await _context.RefreshTokens
-                .Where(r => r.UserId == userId && r.RevokedOn == null)
+                .Where(r => r.UserId == userId.Value && r.RevokedOn == null)
                 .ToListAsync();
 
             foreach (var token in activeTokens)
@@ -201,19 +251,16 @@ public class AuthController : ControllerBase
     [Authorize]
     public async Task<IActionResult> Me()
     {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier) 
-                    ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub);
+        var userId = _currentUser.UserId;
 
-        if (userIdClaim == null || string.IsNullOrEmpty(userIdClaim.Value))
+        if (userId == null)
         {
             return Unauthorized();
         }
 
-        var userId = userIdClaim.Value;
-
         var user = await _context.Users
             .Include(u => u.Customer)
-            .FirstOrDefaultAsync(u => u.Id.ToString() == userId);
+            .FirstOrDefaultAsync(u => u.Id == userId.Value);
 
         if (user == null)
         {
@@ -292,4 +339,12 @@ public class AuthController : ControllerBase
             RefreshToken = refreshToken.Token
         };
     }
+}
+
+public class OtpDetails
+{
+    public string Code { get; set; } = null!;
+    public DateTime ExpiresAtUtc { get; set; }
+    public int Attempts { get; set; }
+    public DateTime LastRequestedAtUtc { get; set; }
 }

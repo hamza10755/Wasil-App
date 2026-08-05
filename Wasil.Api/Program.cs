@@ -6,6 +6,7 @@ using Wasil.Service.Validators;
 using Microsoft.EntityFrameworkCore;
 using Wasil.Data.Entities;
 using Wasil.Data.Interceptors;
+using Wasil.Data.Interfaces;
 using Wasil.Service.Interfaces;
 using Wasil.Service.Services;
 using Wasil.Api.Middleware;
@@ -78,10 +79,13 @@ builder.Services.AddEndpointsApiExplorer();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 builder.Services.AddSwaggerGen();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<ICustomerService, CustomerService>();
 builder.Services.AddScoped<ICatalogService, CatalogService>();
+builder.Services.AddScoped<IAuthPolicyService, AuthPolicyService>();
 builder.Services.AddScoped<DatabaseSeeder>();
 
 var app = builder.Build();

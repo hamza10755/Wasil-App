@@ -9,6 +9,7 @@ using Wasil.Data.Enums;
 using Wasil.Data.Interceptors;
 using EFCore.BulkExtensions;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace Wasil.Service.Services;
 
@@ -94,6 +95,8 @@ public class DatabaseSeeder
     {
         var sw = Stopwatch.StartNew();
         var allCustomers = new List<Customer>();
+        var generatedPhones = new HashSet<string>();
+        var faker = new Faker();
         
         int chunkSize = 5000;
         for (int i = 0; i < count; i += chunkSize)
@@ -105,9 +108,15 @@ public class DatabaseSeeder
             for (int j = 0; j < currentBatchSize; j++)
             {
                 var userId = Guid.NewGuid();
-                var firstName = new Faker().Name.FirstName();
-                var lastName = new Faker().Name.LastName();
-                var uniquePhone = "079" + new Faker().Random.Number(1000000, 9999999);
+                var firstName = faker.Name.FirstName();
+                var lastName = faker.Name.LastName();
+                
+                string uniquePhone;
+                do
+                {
+                    uniquePhone = "079" + faker.Random.Number(1000000, 9999999);
+                } while (!generatedPhones.Add(uniquePhone));
+
                 var uniqueEmail = $"{firstName.ToLower()}_{lastName.ToLower()}_{Guid.NewGuid().ToString().Substring(0, 4)}@example.com";
 
                 var user = new User
@@ -162,6 +171,27 @@ public class DatabaseSeeder
         _context.SaveChanges();
         Console.WriteLine("Seeded Default Admin User (admin@wasil.com).");
     }
+    private void ClearDatabase()
+    {
+        Console.WriteLine("Clearing existing database records...");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [AuditTrail]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [RefreshTokens]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [OrderLineModifier]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [OrderLine]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [OrderStatusHistory]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [Order]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [productModifiers]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [Product]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [Category]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [Address]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [Customer]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [Users]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [Break]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [Occasion]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [StoreHours]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [Store]");
+    }
+
     public void SeedAll()
     {
         var stopwatch = Stopwatch.StartNew();
@@ -171,6 +201,7 @@ public class DatabaseSeeder
 
         try
         {
+            ClearDatabase();
             SeedAdminUser();
 
             var stores = SeedStores(50);
