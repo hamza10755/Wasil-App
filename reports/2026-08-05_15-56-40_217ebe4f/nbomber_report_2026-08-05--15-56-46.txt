@@ -1,0 +1,6 @@
+test info
+test suite: nbomber_default_test_suite_name
+test name: nbomber_default_test_name
+session id: 2026-08-05_15-56-40_217ebe4f
+
+

@@ -1,0 +1,19 @@
+2026-08-05 18:52:00.938 +03:00 [INF] [ThreadId:1] NBomber 6.5.0 started a new session: 2026-08-05_15-52-00_b7e89e6
+2026-08-05 18:52:00.966 +03:00 [INF] [ThreadId:1] NBomber started as single node
+2026-08-05 18:52:00.967 +03:00 [INF] [ThreadId:1] License validation....
+2026-08-05 18:52:00.968 +03:00 [WRN] [ThreadId:1] THIS VERSION IS FREE ONLY FOR PERSONAL USE. You can't use it for an organization.
+2026-08-05 18:52:00.978 +03:00 [INF] [ThreadId:1] Reports folder: /Users/hamzabillah/Desktop/everything/Wasil/ApiLoadTests/bin/Release/net10.0/reports/2026-08-05_15-52-00_b7e89e6
+2026-08-05 18:52:00.979 +03:00 [INF] [ThreadId:1] Plugins: no plugins were loaded
+2026-08-05 18:52:00.979 +03:00 [INF] [ThreadId:1] Reporting sinks: no reporting sinks were loaded
+2026-08-05 18:52:00.979 +03:00 [INF] [ThreadId:1] Starting init...
+2026-08-05 18:52:00.983 +03:00 [INF] [ThreadId:1] Target scenarios: fetch_stores_scenario, search_products_scenario
+2026-08-05 18:52:00.984 +03:00 [INF] [ThreadId:1] Init finished
+2026-08-05 18:52:00.993 +03:00 [INF] [ThreadId:1] Starting warm up...
+2026-08-05 18:52:00.993 +03:00 [INF] [ThreadId:1] Warm up for scenarios: fetch_stores_scenario, search_products_scenario
+2026-08-05 18:52:00.995 +03:00 [INF] [ThreadId:1] Warm up duration: 00:00:05
+2026-08-05 18:52:07.011 +03:00 [INF] [ThreadId:14] Starting bombing...
+2026-08-05 18:52:33.654 +03:00 [WRN] [ThreadId:21] Stopping test early: stop command activated by CLI
+2026-08-05 18:52:33.663 +03:00 [INF] [ThreadId:18] Waiting on scenarios completion...
+2026-08-05 18:52:36.677 +03:00 [INF] [ThreadId:16] Calculating final statistics...
+2026-08-05 18:52:36.903 +03:00 [INF] [ThreadId:16] Reports saved in folder: /Users/hamzabillah/Desktop/everything/Wasil/reports/2026-08-05_15-52-00_b7e89e6
+2026-08-05 18:52:36.903 +03:00 [WRN] [ThreadId:16] THIS VERSION IS FREE ONLY FOR PERSONAL USE. You can't use it for an organization.
