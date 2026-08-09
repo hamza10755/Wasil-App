@@ -11,6 +11,8 @@ using Wasil.Service.Interfaces;
 using Wasil.Service.Services;
 using Wasil.Api.Middleware;
 using Serilog;
+using Hangfire;
+using Hangfire.SqlServer;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -67,7 +69,13 @@ builder.Services.AddAuthentication(options =>
         ClockSkew = TimeSpan.Zero
     };
 });
+builder.Services.AddHangfire(configuration => configuration
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_170)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UseSqlServerStorage(builder.Configuration.GetConnectionString("DefaultConnection"))); // Match your connection string name
 
+builder.Services.AddHangfireServer();
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddMemoryCache();
@@ -86,6 +94,8 @@ builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<ICustomerService, CustomerService>();
 builder.Services.AddScoped<ICatalogService, CatalogService>();
 builder.Services.AddScoped<IAuthPolicyService, AuthPolicyService>();
+builder.Services.AddScoped<ISmsService, SmsService>();
+builder.Services.AddScoped<INotificationEngine, NotificationEngine>();
 builder.Services.AddScoped<DatabaseSeeder>();
 
 var app = builder.Build();
@@ -124,6 +134,29 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.UseHangfireDashboard("/hangfire", new DashboardOptions
+{
+    Authorization = new[] { new HangfireAuthorizationFilter() }
+});
+
+RecurringJob.AddOrUpdate<IOrderService>(
+    "cancel-stale-orders",
+    x => x.CancelStalePendingOrdersAsync(),
+    "*/5 * * * *"
+);
+
+RecurringJob.AddOrUpdate<ITokenService>(
+    "hygiene-cleanup",
+    x => x.CleanupRefreshTokensAsync(),
+    "0 3 * * *"
+);
+
+RecurringJob.AddOrUpdate<IOrderService>(
+    "nightly-sales-report",
+    x => x.GenerateNightlySalesReportAsync(null),
+    "0 2 * * *"
+);
+
 app.MapGet("/api/test/stores", (WasilDbContext db) => 
     db.Stores.Take(10).ToList());
 
@@ -132,6 +165,22 @@ app.MapGet("/api/test/customers", (WasilDbContext db) =>
 
 app.MapGet("/api/test/products", (WasilDbContext db) => 
     db.Products.Take(1000).ToList());
+
+app.MapGet("/api/test/debug-auth/{customerId:int}", async (int customerId, WasilDbContext db, System.Security.Claims.ClaimsPrincipal user) =>
+{
+    var currentUserId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? user.FindFirst("sub")?.Value;
+    var currentUserRole = user.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    var customer = await db.Customers.FirstOrDefaultAsync(c => c.Id == customerId);
+    
+    return Results.Ok(new
+    {
+        TokenUserId = currentUserId,
+        TokenRole = currentUserRole,
+        CustomerExistsInDb = customer != null,
+        CustomerDbUserId = customer?.UserId.ToString(),
+        IsMatch = currentUserId != null && currentUserId.Equals(customer?.UserId.ToString(), StringComparison.OrdinalIgnoreCase)
+    });
+});
 
 app.MapDelete("/api/test/customers/{id:int}", (int id, WasilDbContext db) =>
 {

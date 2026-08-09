@@ -8,6 +8,7 @@ using Wasil.Service.DTOs;
 using Wasil.Service.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace Wasil.Api.Controllers;
 
@@ -35,10 +36,23 @@ public class OrderController : ControllerBase
     public async Task<IActionResult> PlaceOrder([FromBody] CreateOrderDto dto)
     {
         var customer = await _context.Customers.FindAsync(dto.CustomerId);
-        if (customer == null) return NotFound();
+        if (customer == null)
+        {
+            Console.WriteLine($"[PlaceOrder Debug] Customer with ID {dto.CustomerId} was not found.");
+            return NotFound();
+        }
+
+        var currentUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value;
+        var currentUserRole = User.FindFirst(ClaimTypes.Role)?.Value;
+
+        Console.WriteLine($"[PlaceOrder Debug] Authenticated User ID: {currentUserId}");
+        Console.WriteLine($"[PlaceOrder Debug] Authenticated User Role: {currentUserRole}");
+        Console.WriteLine($"[PlaceOrder Debug] Target Customer ID: {dto.CustomerId}");
+        Console.WriteLine($"[PlaceOrder Debug] Target Customer UserId: {customer.UserId}");
 
         if (!await _authPolicyService.CanAccessCustomerDataAsync(customer.UserId.ToString()))
         {
+            Console.WriteLine("[PlaceOrder Debug] Auth check failed: CanAccessCustomerDataAsync returned false.");
             return Forbid();
         }
 

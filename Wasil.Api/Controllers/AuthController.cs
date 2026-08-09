@@ -12,6 +12,7 @@ using System.Security.Claims;
 using Wasil.Data.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
 using System.Security.Cryptography;
+using Hangfire;
 
 namespace Wasil.Api.Controllers;
 
@@ -117,7 +118,7 @@ public class AuthController : ControllerBase
 
         _cache.Set(cacheKey, otpDetails, TimeSpan.FromMinutes(5));
 
-        _logger.LogInformation("OTP for {Phone} is {OTP}", request.Phone, randomCode);
+        BackgroundJob.Enqueue<ISmsService>(x => x.SendOtpSmsAsync(request.Phone, randomCode));
 
         return Ok(new { message = "OTP sent successfully." });
     }
@@ -338,7 +339,7 @@ public class AuthController : ControllerBase
             user.Phone,
             user.Role,
             user.StoreId,
-            CustomerProfile = user.Customer != null ? new { user.Customer.FirstName, user.Customer.LastName } : null
+            CustomerProfile = user.Customer != null ? new { user.Customer.Id, user.Customer.FirstName, user.Customer.LastName } : null
         });
     }
 

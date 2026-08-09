@@ -6,6 +6,9 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.Configuration;
+using Microsoft.EntityFrameworkCore;
+using System.Linq;
+using System.Threading.Tasks;
 using Wasil.Data.Entities;
 using Wasil.Service.Interfaces;
 
@@ -14,10 +17,12 @@ namespace Wasil.Service.Services;
 public class TokenService : ITokenService
 {
     private readonly IConfiguration _configuration;
+    private readonly WasilDbContext _dbContext;
 
-    public TokenService(IConfiguration configuration)
+    public TokenService(IConfiguration configuration, WasilDbContext dbContext)
     {
         _configuration = configuration;
+        _dbContext = dbContext;
     }
 
     public string GenerateToken(User user)
@@ -85,5 +90,22 @@ public class TokenService : ITokenService
             throw new SecurityTokenException("Invalid token");
 
         return principal;
+    }
+
+    public async Task CleanupRefreshTokensAsync()
+    {
+        var now = DateTime.UtcNow;
+        var sevenDaysAgo = now.AddDays(-7);
+
+        // Delete expired tokens OR tokens revoked more than 7 days ago
+        var expiredOrOldRevokedTokens = await _dbContext.RefreshTokens
+            .Where(t => t.ExpiresOn <= now || (t.RevokedOn != null && t.RevokedOn <= sevenDaysAgo))
+            .ToListAsync();
+
+        if (expiredOrOldRevokedTokens.Any())
+        {
+            _dbContext.RefreshTokens.RemoveRange(expiredOrOldRevokedTokens);
+            await _dbContext.SaveChangesAsync();
+        }
     }
 }
