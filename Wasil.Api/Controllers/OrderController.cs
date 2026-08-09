@@ -42,8 +42,112 @@ public class OrderController : ControllerBase
             return Forbid();
         }
 
-        var newOrder = _orderService.PlaceOrder(dto);
-        return StatusCode(201, newOrder);
+        if (Request.Headers.TryGetValue("Idempotency-Key", out var headerValue) && !string.IsNullOrEmpty(headerValue))
+        {
+            var key = headerValue.ToString();
+            var strategy = _context.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync<IActionResult>(async () =>
+            {
+                using var transaction = await _context.Database.BeginTransactionAsync();
+
+                var existing = await _context.IdempotentRequests
+                    .FromSqlRaw("SELECT * FROM IdempotentRequests WITH (UPDLOCK, ROWLOCK) WHERE IdempotencyKey = {0}", key)
+                    .FirstOrDefaultAsync();
+
+                if (existing != null)
+                {
+                    if (existing.ResponseBody != null)
+                    {
+                        await transaction.CommitAsync();
+                        return new ContentResult
+                        {
+                            Content = existing.ResponseBody,
+                            ContentType = "application/json",
+                            StatusCode = existing.StatusCode
+                        };
+                    }
+                    else
+                    {
+                        await transaction.RollbackAsync();
+                        return Conflict(new { message = "Request already in progress." });
+                    }
+                }
+
+                var placeholder = new IdempotentRequest
+                {
+                    IdempotencyKey = key,
+                    StatusCode = 0,
+                    ResponseBody = null,
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+
+                try
+                {
+                    _context.IdempotentRequests.Add(placeholder);
+                    await _context.SaveChangesAsync();
+                }
+                catch (DbUpdateException)
+                {
+                    await transaction.RollbackAsync();
+
+                    using var retryTx = await _context.Database.BeginTransactionAsync();
+                    var retryResult = await _context.IdempotentRequests
+                        .FromSqlRaw("SELECT * FROM IdempotentRequests WITH (UPDLOCK, ROWLOCK) WHERE IdempotencyKey = {0}", key)
+                        .FirstOrDefaultAsync();
+
+                    if (retryResult != null && retryResult.ResponseBody != null)
+                    {
+                        await retryTx.CommitAsync();
+                        return new ContentResult
+                        {
+                            Content = retryResult.ResponseBody,
+                            ContentType = "application/json",
+                            StatusCode = retryResult.StatusCode
+                        };
+                    }
+
+                    await retryTx.RollbackAsync();
+                    return Conflict(new { message = "Request already in progress." });
+                }
+
+                Order newOrder;
+                try
+                {
+                    newOrder = _orderService.PlaceOrder(dto);
+                }
+                catch (Exception ex)
+                {
+                    var errBody = System.Text.Json.JsonSerializer.Serialize(new { message = ex.Message });
+                    placeholder.StatusCode = 400;
+                    placeholder.ResponseBody = errBody;
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                    return BadRequest(new { message = ex.Message });
+                }
+
+                var responseBody = System.Text.Json.JsonSerializer.Serialize(newOrder, new System.Text.Json.JsonSerializerOptions
+                {
+                    ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles
+                });
+
+                placeholder.StatusCode = 201;
+                placeholder.ResponseBody = responseBody;
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return StatusCode(201, newOrder);
+            });
+        }
+
+        try
+        {
+            var newOrder = _orderService.PlaceOrder(dto);
+            return StatusCode(201, newOrder);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpGet("{id:int}")]

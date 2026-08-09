@@ -45,6 +45,8 @@ public partial class WasilDbContext : DbContext
 
     public virtual DbSet<RefreshToken> RefreshTokens { get; set; }
 
+    public virtual DbSet<IdempotentRequest> IdempotentRequests { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WasilDbContext).Assembly);
