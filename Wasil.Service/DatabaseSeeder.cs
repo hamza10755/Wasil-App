@@ -34,7 +34,7 @@ public class DatabaseSeeder
             .RuleFor(s => s.CreatedAtUtc, f => f.Date.Past(1));
 
         var stores = faker.Generate(count);
-        _context.BulkInsert(stores);
+        _context.BulkInsert(stores, new BulkConfig { SetOutputIdentity = true });
 
         Console.WriteLine($"Seeded {count} Stores in {sw.ElapsedMilliseconds}ms");
         return stores;
@@ -51,7 +51,7 @@ public class DatabaseSeeder
         var categories = faker.Generate(count);
         categories = categories.GroupBy(c => c.Name).Select(g => g.First()).ToList();
 
-        _context.BulkInsert(categories);
+        _context.BulkInsert(categories, new BulkConfig { SetOutputIdentity = true });
 
         Console.WriteLine($"Seeded {categories.Count} Categories in {sw.ElapsedMilliseconds}ms");
         return categories;

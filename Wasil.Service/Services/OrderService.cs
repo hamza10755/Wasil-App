@@ -18,6 +18,9 @@ public class OrderService : IOrderService
     private readonly ILogger<OrderService> _logger;
     
     private static int _orderCounter = 0;
+    public static bool ForceCollisionForTesting { get; set; } = 
+        Environment.GetEnvironmentVariable("ASPNETCORE_FORCE_COLLISION") == "true";
+    private static int _collisionCounter = 0;
 
     private static readonly Dictionary<OrderStatus, List<OrderStatus>> AllowedTransitions = new()
     {
@@ -37,6 +40,15 @@ public class OrderService : IOrderService
 
     private string Generate12DigitOrderCode()
     {
+        if (ForceCollisionForTesting)
+        {
+            int val = Interlocked.Increment(ref _collisionCounter);
+            if (val <= 2)
+            {
+                return "2026COLLID99";
+            }
+        }
+
         string yyMm = DateTime.UtcNow.ToString("yyMM");
 
         int randomValue = new Random().Next(0, 100000);
@@ -61,7 +73,8 @@ public class OrderService : IOrderService
         var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
         return executionStrategy.Execute(() =>
         {
-            using var transaction = _dbContext.Database.BeginTransaction();
+            var hasExistingTransaction = _dbContext.Database.CurrentTransaction != null;
+            var transaction = hasExistingTransaction ? null : _dbContext.Database.BeginTransaction();
             try
             {
                 var customerExists = _dbContext.Customers.Any(c => c.Id == dto.CustomerId);
@@ -77,8 +90,9 @@ public class OrderService : IOrderService
                     throw new ArgumentException($"Address with ID {dto.AddressId} does not belong to Customer {dto.CustomerId}.");
 
                 var productIds = dto.Lines.Select(l => l.ProductId).Distinct().ToList();
+                var sortedProductIds = productIds.OrderBy(id => id).ToList();
                 var products = _dbContext.Products
-                    .Where(p => productIds.Contains(p.Id))
+                    .FromSqlRaw($"SELECT * FROM Product WITH (UPDLOCK, ROWLOCK) WHERE productId IN ({string.Join(",", sortedProductIds)})")
                     .ToDictionary(p => p.Id);
 
                 decimal subtotal = 0;
@@ -132,7 +146,7 @@ public class OrderService : IOrderService
                 for (int i = 0; i < maxRetries && !saved; i++)
                 {
                     code = Generate12DigitOrderCode();
-                    if (!_dbContext.Orders.Any(o => o.OrderCode == code))
+                    if (newOrder == null)
                     {
                         newOrder = new Order
                         {
@@ -146,10 +160,21 @@ public class OrderService : IOrderService
                             Status = OrderStatus.Pending,
                             OrderLines = orderLines
                         };
-
                         _dbContext.Orders.Add(newOrder);
+                    }
+                    else
+                    {
+                        newOrder.OrderCode = code;
+                    }
+
+                    try
+                    {
                         _dbContext.SaveChanges();
                         saved = true;
+                    }
+                    catch (DbUpdateException ex) when (i < maxRetries - 1 && IsUniqueConstraintViolation(ex))
+                    {
+                        _logger.LogWarning("Order code collision detected for code {OrderCode}. Retrying...", code);
                     }
                 }
 
@@ -168,7 +193,14 @@ public class OrderService : IOrderService
                 _dbContext.OrderStatusHistories.Add(history);
                 _dbContext.SaveChanges();
 
-                transaction.Commit();
+                if (transaction != null)
+                {
+                    transaction.Commit();
+                }
+                else
+                {
+                    _dbContext.SaveChanges();
+                }
 
                 _logger.LogInformation("Successfully placed Order ID {OrderId} with Code {OrderCode}.", newOrder.Id, newOrder.OrderCode);
                 return newOrder;
@@ -176,10 +208,22 @@ public class OrderService : IOrderService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error placing order. Transaction rolled back.");
-                transaction.Rollback();
+                if (transaction != null)
+                {
+                    transaction.Rollback();
+                }
                 throw;
             }
         });
+    }
+
+    private bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        if (ex.InnerException is Microsoft.Data.SqlClient.SqlException sqlEx)
+        {
+            return sqlEx.Number == 2601 || sqlEx.Number == 2627;
+        }
+        return false;
     }
 
     public OrderDetailDto GetOrderDetails(int orderId)
