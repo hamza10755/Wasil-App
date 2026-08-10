@@ -455,71 +455,79 @@ public class OrderService : IOrderService
      }
 
     public async Task CancelStalePendingOrdersAsync()
+{
+    var cutoff = DateTime.UtcNow.AddMinutes(-30);
+    
+    var staleOrderIds = await _dbContext.Orders
+        .Where(o => o.Status == OrderStatus.Pending && o.CreatedAtUtc < cutoff)
+        .Select(o => o.Id)
+        .ToListAsync();
+
+    if (!staleOrderIds.Any())
     {
-        var cutoff = DateTime.UtcNow.AddMinutes(-1);
-        
-        var staleOrderIds = await _dbContext.Orders
-            .Where(o => o.Status == OrderStatus.Pending && o.CreatedAtUtc < cutoff)
-            .Select(o => o.Id)
-            .ToListAsync();
+        return;
+    }
 
-        if (!staleOrderIds.Any())
-        {
-            return;
-        }
+    var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
 
-        var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
+    foreach (var orderId in staleOrderIds)
+    {
         await executionStrategy.ExecuteAsync(async () =>
         {
-            foreach (var orderId in staleOrderIds)
+            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            try
             {
-                using var transaction = await _dbContext.Database.BeginTransactionAsync();
-                try
+                var order = await _dbContext.Orders
+                    .FromSqlRaw("SELECT * FROM [Order] WITH (UPDLOCK, ROWLOCK) WHERE orderId = {0}", orderId)
+                    .Include(o => o.OrderLines)
+                    .ThenInclude(ol => ol.Product)
+                    .FirstOrDefaultAsync();
+
+                if (order == null || order.Status != OrderStatus.Pending)
                 {
-                    var order = await _dbContext.Orders
-                        .FromSqlRaw("SELECT * FROM [Order] WITH (UPDLOCK, ROWLOCK) WHERE orderId = {0}", orderId)
-                        .Include(o => o.OrderLines)
-                        .ThenInclude(ol => ol.Product)
-                        .FirstOrDefaultAsync();
-
-                    if (order == null || order.Status != OrderStatus.Pending)
-                    {
-                        await transaction.RollbackAsync();
-                        continue;
-                    }
-
-                    foreach (var line in order.OrderLines)
-                    {
-                        if (line.Product != null)
-                        {
-                            line.Product.StockQuantity += line.Quantity;
-                        }
-                    }
-
-                    order.Status = OrderStatus.Cancelled;
-
-                    var history = new OrderStatusHistory
-                    {
-                        OrderId = order.Id,
-                        OldStatus = OrderStatus.Pending.ToString(),
-                        NewStatus = OrderStatus.Cancelled.ToString(),
-                        TimestampUtc = DateTime.UtcNow
-                    };
-                    _dbContext.OrderStatusHistories.Add(history);
-                    await _dbContext.SaveChangesAsync();
-
-                    await transaction.CommitAsync();
-                    _logger.LogInformation("System background job successfully cancelled stale pending Order ID {OrderId}.", orderId);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error occurred during system background cancellation of Order ID {OrderId}.", orderId);
                     await transaction.RollbackAsync();
-                    throw;
+                    return;
                 }
+
+                foreach (var line in order.OrderLines)
+                {
+                    if (line.Product != null)
+                    {
+                        line.Product.StockQuantity += line.Quantity;
+                    }
+                }
+
+                order.Status = OrderStatus.Cancelled;
+
+                var history = new OrderStatusHistory
+                {
+                    OrderId = order.Id,
+                    OldStatus = OrderStatus.Pending.ToString(),
+                    NewStatus = OrderStatus.Cancelled.ToString(),
+                    TimestampUtc = DateTime.UtcNow
+                };
+                
+                _dbContext.OrderStatusHistories.Add(history);
+                await _dbContext.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+                _logger.LogInformation("System background job successfully cancelled stale pending Order ID {OrderId}.", orderId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error occurred during system background cancellation of Order ID {OrderId}.", orderId);
+                await transaction.RollbackAsync();
+                
+                foreach (var entry in _dbContext.ChangeTracker.Entries().Where(e => e.State != EntityState.Unchanged))
+                {
+                    entry.State = EntityState.Detached;
+                }
+                
+                throw;
             }
         });
     }
+}
 
     public async Task GenerateNightlySalesReportAsync(Hangfire.Server.PerformContext? performContext)
     {

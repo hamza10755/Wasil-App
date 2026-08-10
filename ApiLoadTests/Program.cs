@@ -195,7 +195,8 @@ class Program
         Console.WriteLine("4. refresh_token_concurrency (Attack refresh token rotation)");
         Console.WriteLine("5. place_order_idempotency (Attack place-order idempotency)");
         Console.WriteLine("6. deadlock_concurrency (Attack consistent lock ordering / induce deadlock)");
-        Console.WriteLine("Specify target scenario index (1-6) as an argument to run a specific test (defaults to 1):\n");
+        Console.WriteLine("7. custom_three_customer_flow (Custom flow: A -> C -> B with overlapping products)");
+        Console.WriteLine("Specify target scenario index (1-7) as an argument to run a specific test (defaults to 1):\n");
 
         var selection = "1";
         if (args.Length > 0)
@@ -205,6 +206,10 @@ class Program
 
         switch (selection)
         {
+            case "7":
+                Console.WriteLine("Starting CUSTOM THREE-CUSTOMER FLOW test (Incident #1)...");
+                await RunThreeCustomerFlowTest(baseUrl, httpClient, jwtKey, jwtIssuer, jwtAudience, dbOptions);
+                break;
             case "6":
                 Console.WriteLine("Starting DEADLOCK CONCURRENCY tests (Incident #6)...");
                 await RunDeadlockConcurrencyTest(baseUrl, httpClient, customer, address.Id, tokenString, dbOptions);
@@ -726,5 +731,362 @@ class Program
 
         Console.WriteLine($"\nDeadlock Test Completed: Successes = {successCount}, Failures/Deadlocks = {failureCount}");
         Console.WriteLine("=================================================\n");
+    }
+
+    private static async Task RunThreeCustomerFlowTest(string baseUrl, HttpClient httpClient, string jwtKey, string jwtIssuer, string jwtAudience, DbContextOptions<WasilDbContext> dbOptions)
+    {
+        Console.WriteLine("\n=================================================");
+        Console.WriteLine(" RUNNING CUSTOM THREE-CUSTOMER FLOW CONCURRENCY TEST (Incident #1)");
+        Console.WriteLine("=================================================");
+
+        using var db = new WasilDbContext(dbOptions);
+
+        // 1. Ensure we have a store
+        var store = await db.Stores.FirstOrDefaultAsync();
+        if (store == null)
+        {
+            store = new Store
+            {
+                StoreName = "Concurrency Test Store",
+                StoreLocation = "Test City",
+                Status = true,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            db.Stores.Add(store);
+            await db.SaveChangesAsync();
+        }
+
+        // 2. Ensure we have a Category
+        var category = await db.Categories.FirstOrDefaultAsync();
+        if (category == null)
+        {
+            category = new Category
+            {
+                Name = "Test Category",
+                Description = "Category for tests",
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            db.Categories.Add(category);
+            await db.SaveChangesAsync();
+        }
+
+        // 3. Ensure we have 5 specific products in this store
+        var products = new List<Product>();
+        for (int i = 1; i <= 5; i++)
+        {
+            var pName = $"Concurrency Product {i}";
+            var p = await db.Products.FirstOrDefaultAsync(p => p.StoreId == store.Id && p.Name == pName);
+            if (p == null)
+            {
+                p = new Product
+                {
+                    StoreId = store.Id,
+                    CategoryId = category.Id,
+                    Name = pName,
+                    Price = 10.00m + i,
+                    StockQuantity = i == 1 || i == 4 ? 2 : 5, // Product 1 and 4 have 2 stock. Others have 5.
+                    Availability = true,
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+                db.Products.Add(p);
+            }
+            else
+            {
+                // Reset stock for clean test runs
+                p.StockQuantity = i == 1 || i == 4 ? 2 : 5;
+                p.Availability = true;
+                db.Entry(p).State = EntityState.Modified;
+            }
+            products.Add(p);
+        }
+        await db.SaveChangesAsync();
+
+        // 4. Ensure we have 3 customers (Customer A, Customer B, Customer C) and users
+        var customers = new List<Customer>();
+        var names = new[] { ("Customer", "A"), ("Customer", "B"), ("Customer", "C") };
+        foreach (var (first, last) in names)
+        {
+            var email = $"customer.{last.ToLower()}@concurrency.test";
+            var phone = $"999000000{last}";
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
+            if (user == null)
+            {
+                user = new User
+                {
+                    Id = Guid.NewGuid(),
+                    Email = email,
+                    Phone = phone,
+                    PasswordHash = "AQAAAAEAACcQAAAAEP...", // Dummy hash
+                    Role = Role.Customer
+                };
+                db.Users.Add(user);
+                await db.SaveChangesAsync(); // save user to get ID
+            }
+
+            var customer = await db.Customers.FirstOrDefaultAsync(c => c.UserId == user.Id);
+            if (customer == null)
+            {
+                customer = new Customer
+                {
+                    UserId = user.Id,
+                    FirstName = first,
+                    LastName = last,
+                    Email = email,
+                    PhoneNumber = phone,
+                    Gender = "Other",
+                    Location = "Concurrency City"
+                };
+                db.Customers.Add(customer);
+                await db.SaveChangesAsync();
+            }
+
+            // Ensure address exists
+            var address = await db.Addresses.FirstOrDefaultAsync(a => a.CustomerId == customer.Id);
+            if (address == null)
+            {
+                address = new Address
+                {
+                    CustomerId = customer.Id,
+                    Street = "Concurrency St",
+                    City = "Concurrency City",
+                    ZipCode = "12345",
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+                db.Addresses.Add(address);
+                await db.SaveChangesAsync();
+            }
+
+            customers.Add(customer);
+        }
+
+        var custA = customers[0]; // Customer A
+        var custB = customers[1]; // Customer B
+        var custC = customers[2]; // Customer C
+
+        // Generate tokens
+        var tokenA = GenerateTokenString(custA.UserId, jwtKey, jwtIssuer, jwtAudience);
+        var tokenB = GenerateTokenString(custB.UserId, jwtKey, jwtIssuer, jwtAudience);
+        var tokenC = GenerateTokenString(custC.UserId, jwtKey, jwtIssuer, jwtAudience);
+
+        // Fetch addresses for orders
+        var addrA = await db.Addresses.FirstAsync(a => a.CustomerId == custA.Id);
+        var addrB = await db.Addresses.FirstAsync(a => a.CustomerId == custB.Id);
+        var addrC = await db.Addresses.FirstAsync(a => a.CustomerId == custC.Id);
+
+        // Define product IDs for mapping
+        var p1 = products[0];
+        var p2 = products[1];
+        var p3 = products[2];
+        var p4 = products[3];
+        var p5 = products[4];
+
+        // Warm up API server and EF Core context queries to eliminate JIT cold-start latency
+        Console.WriteLine("Warming up API server and EF Core queries...");
+        try
+        {
+            // Perform a quick read request to initialize the EF Core model cache
+            await httpClient.GetAsync($"{baseUrl}/api/v1/stores?page=1&pageSize=1");
+            // Also hit the order endpoint with an empty request to JIT compile the post route
+            using var warmupContent = new StringContent("{}", Encoding.UTF8, "application/json");
+            await httpClient.PostAsync($"{baseUrl}/api/v1/orders", warmupContent);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Warm-up warning: {ex.Message}");
+        }
+        Console.WriteLine("Warm-up complete. Starting test run.");
+
+        // Output visual setup before test
+        Console.WriteLine("\n╔═══════════════════════════════════════════════════════════════════════════╗");
+        Console.WriteLine("║                    EXPERIMENT LAYOUT & INITIAL STATE                      ║");
+        Console.WriteLine("╠═══════════════════════════════════════════════════════════════════════════╣");
+        Console.WriteLine($"║ Store ID: {store.Id,-63} ║");
+        Console.WriteLine("║                                                                           ║");
+        Console.WriteLine("║ [INITIAL STOCKS]                                                          ║");
+        Console.WriteLine($"║   - Product 1 ({p1.Name,-21} ID: {p1.Id,-6}): Stock = {p1.StockQuantity,-2}                     ║");
+        Console.WriteLine($"║   - Product 2 ({p2.Name,-21} ID: {p2.Id,-6}): Stock = {p2.StockQuantity,-2}                     ║");
+        Console.WriteLine($"║   - Product 3 ({p3.Name,-21} ID: {p3.Id,-6}): Stock = {p3.StockQuantity,-2}                     ║");
+        Console.WriteLine($"║   - Product 4 ({p4.Name,-21} ID: {p4.Id,-6}): Stock = {p4.StockQuantity,-2}                     ║");
+        Console.WriteLine($"║   - Product 5 ({p5.Name,-21} ID: {p5.Id,-6}): Stock = {p5.StockQuantity,-2}                     ║");
+        Console.WriteLine("║                                                                           ║");
+        Console.WriteLine("║ [CUSTOMERS & DEMANDS]                                                     ║");
+        Console.WriteLine($"║   1. Customer A (ID: {custA.Id,-6}) demands: Product 1, Product 2, Product 3      ║");
+        Console.WriteLine($"║   2. Customer C (ID: {custC.Id,-6}) demands: Product 1, Product 4                 ║");
+        Console.WriteLine($"║   3. Customer B (ID: {custB.Id,-6}) demands: Product 4, Product 5, Product 1      ║");
+        Console.WriteLine("║                                                                           ║");
+        Console.WriteLine("║ [FLOW TIMELINE]                                                           ║");
+        Console.WriteLine("║   [Customer A] ────────► Send Order Request                               ║");
+        Console.WriteLine("║       │                                                                   ║");
+        Console.WriteLine("║       ▼ (delay 100ms)                                                     ║");
+        Console.WriteLine("║   [Customer C] ────────► Send Order Request                               ║");
+        Console.WriteLine("║       │                                                                   ║");
+        Console.WriteLine("║       ▼ (delay 100ms)                                                     ║");
+        Console.WriteLine("║   [Customer B] ────────► Send Order Request                               ║");
+        Console.WriteLine("╚═══════════════════════════════════════════════════════════════════════════╝\n");
+
+        // Payloads
+        var payloadA = new
+        {
+            customerId = custA.Id,
+            storeId = store.Id,
+            addressId = addrA.Id,
+            paymentMethod = 0,
+            lines = new[]
+            {
+                new { productId = p1.Id, quantity = 1 },
+                new { productId = p2.Id, quantity = 1 },
+                new { productId = p3.Id, quantity = 1 }
+            }
+        };
+
+        var payloadC = new
+        {
+            customerId = custC.Id,
+            storeId = store.Id,
+            addressId = addrC.Id,
+            paymentMethod = 0,
+            lines = new[]
+            {
+                new { productId = p1.Id, quantity = 1 },
+                new { productId = p4.Id, quantity = 1 }
+            }
+        };
+
+        var payloadB = new
+        {
+            customerId = custB.Id,
+            storeId = store.Id,
+            addressId = addrB.Id,
+            paymentMethod = 0,
+            lines = new[]
+            {
+                new { productId = p4.Id, quantity = 1 },
+                new { productId = p5.Id, quantity = 1 },
+                new { productId = p1.Id, quantity = 1 }
+            }
+        };
+
+        Console.WriteLine("Executing flow sequentially with 100ms dispatch delay...");
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        // Dispatch Customer A
+        Console.WriteLine($"[{stopwatch.ElapsedMilliseconds}ms] Dispatching Order for Customer A...");
+        var taskA = Task.Run(async () =>
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/v1/orders");
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", tokenA);
+            req.Content = JsonContent.Create(payloadA);
+            var res = await httpClient.SendAsync(req);
+            var content = await res.Content.ReadAsStringAsync();
+            return new { Customer = "Customer A", StatusCode = res.StatusCode, Content = content, Time = stopwatch.ElapsedMilliseconds };
+        });
+
+        await Task.Delay(100);
+
+        // Dispatch Customer C
+        Console.WriteLine($"[{stopwatch.ElapsedMilliseconds}ms] Dispatching Order for Customer C...");
+        var taskC = Task.Run(async () =>
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/v1/orders");
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", tokenC);
+            req.Content = JsonContent.Create(payloadC);
+            var res = await httpClient.SendAsync(req);
+            var content = await res.Content.ReadAsStringAsync();
+            return new { Customer = "Customer C", StatusCode = res.StatusCode, Content = content, Time = stopwatch.ElapsedMilliseconds };
+        });
+
+        await Task.Delay(100);
+
+        // Dispatch Customer B
+        Console.WriteLine($"[{stopwatch.ElapsedMilliseconds}ms] Dispatching Order for Customer B...");
+        var taskB = Task.Run(async () =>
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/v1/orders");
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", tokenB);
+            req.Content = JsonContent.Create(payloadB);
+            var res = await httpClient.SendAsync(req);
+            var content = await res.Content.ReadAsStringAsync();
+            return new { Customer = "Customer B", StatusCode = res.StatusCode, Content = content, Time = stopwatch.ElapsedMilliseconds };
+        });
+
+        var results = await Task.WhenAll(taskA, taskC, taskB);
+
+        Console.WriteLine("\n--- DISPATCHED RESPONSES ---");
+        foreach (var r in results.OrderBy(x => x.Time))
+        {
+            Console.WriteLine($"[{r.Time}ms] {r.Customer} Response: Status = {r.StatusCode}, Body = {r.Content}");
+        }
+        Console.WriteLine("----------------------------");
+
+        // 5. Query final state from the database
+        using (var dbCheck = new WasilDbContext(dbOptions))
+        {
+            var finalProducts = await dbCheck.Products.Where(p => p.StoreId == store.Id && p.Name.StartsWith("Concurrency Product")).ToListAsync();
+            var finalP1 = finalProducts.FirstOrDefault(p => p.Name == p1.Name);
+            var finalP2 = finalProducts.FirstOrDefault(p => p.Name == p2.Name);
+            var finalP3 = finalProducts.FirstOrDefault(p => p.Name == p3.Name);
+            var finalP4 = finalProducts.FirstOrDefault(p => p.Name == p4.Name);
+            var finalP5 = finalProducts.FirstOrDefault(p => p.Name == p5.Name);
+
+            Console.WriteLine("\n╔═══════════════════════════════════════════════════════════════════════════╗");
+            Console.WriteLine("║                        POST-EXPERIMENT REPORT                             ║");
+            Console.WriteLine("╠═══════════════════════════════════════════════════════════════════════════╣");
+            Console.WriteLine("║ [FINAL STOCKS]                                                            ║");
+            Console.WriteLine($"║   - Product 1: Initial = 2, Final Stock = {finalP1?.StockQuantity,-2}                              ║");
+            Console.WriteLine($"║   - Product 2: Initial = 5, Final Stock = {finalP2?.StockQuantity,-2}                              ║");
+            Console.WriteLine($"║   - Product 3: Initial = 5, Final Stock = {finalP3?.StockQuantity,-2}                              ║");
+            Console.WriteLine($"║   - Product 4: Initial = 2, Final Stock = {finalP4?.StockQuantity,-2}                              ║");
+            Console.WriteLine($"║   - Product 5: Initial = 5, Final Stock = {finalP5?.StockQuantity,-2}                              ║");
+            Console.WriteLine("║                                                                           ║");
+            Console.WriteLine("║ [ORDER PROCESSING OUTCOME]                                                ║");
+            foreach (var r in results.OrderBy(x => x.Customer))
+            {
+                var outcome = r.StatusCode == System.Net.HttpStatusCode.Created || r.StatusCode == System.Net.HttpStatusCode.OK
+                    ? "SUCCESS (Order Placed)      "
+                    : $"FAILED (Error {r.StatusCode})";
+                Console.WriteLine($"║   - {r.Customer}: {outcome,-44} ║");
+            }
+            Console.WriteLine("║                                                                           ║");
+            Console.WriteLine("║ [VERDICT / ASSESSMENT]                                                    ║");
+            
+            bool hasNegativeStock = finalProducts.Any(p => p.StockQuantity < 0);
+            int successfulOrdersCount = results.Count(r => r.StatusCode == System.Net.HttpStatusCode.Created || r.StatusCode == System.Net.HttpStatusCode.OK);
+            
+            if (hasNegativeStock)
+            {
+                Console.WriteLine("║   CRITICAL: Stock went negative! Database is inconsistent.                 ║");
+            }
+            else if (successfulOrdersCount == 3)
+            {
+                Console.WriteLine("║   VULNERABLE: Oversold stock detected! 3 orders succeeded but P1 stock=2.  ║");
+            }
+            else
+            {
+                Console.WriteLine("║   SECURE: Concurrency locks successfully serialised the transactions.      ║");
+                Console.WriteLine("║   Product stock was correctly decremented and no overselling occurred.     ║");
+            }
+            Console.WriteLine("╚═══════════════════════════════════════════════════════════════════════════╝\n");
+        }
+    }
+
+    private static string GenerateTokenString(Guid userId, string jwtKey, string jwtIssuer, string jwtAudience)
+    {
+        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+        var creds = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+        var claims = new List<Claim>
+        {
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+            new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()),
+            new Claim(ClaimTypes.Role, "Customer")
+        };
+        var jwtToken = new JwtSecurityToken(
+            issuer: jwtIssuer,
+            audience: jwtAudience,
+            claims: claims,
+            expires: DateTime.UtcNow.AddHours(1),
+            signingCredentials: creds
+        );
+        return new JwtSecurityTokenHandler().WriteToken(jwtToken);
     }
 }

@@ -309,6 +309,20 @@ public class AuthController : ControllerBase
             await _context.SaveChangesAsync();
         }
 
+        var jti = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Jti)?.Value;
+        var expClaim = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Exp)?.Value;
+
+        if (jti != null && expClaim != null)
+        {
+            var expirationTime = DateTimeOffset.FromUnixTimeSeconds(long.Parse(expClaim));
+            var timeUntilExpiry = expirationTime - DateTimeOffset.UtcNow;
+
+            if (timeUntilExpiry > TimeSpan.Zero)
+            {
+                _cache.Set($"blocklist:{jti}", true, timeUntilExpiry);
+            }
+        }
+
         return Ok(new { message = "Successfully logged out and tokens revoked." });
     }
 

@@ -68,6 +68,21 @@ builder.Services.AddAuthentication(options =>
         IssuerSigningKey = new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(jwtKey)),
         ClockSkew = TimeSpan.Zero
     };
+
+    options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+    {
+        OnTokenValidated = context =>
+        {
+            var cache = context.HttpContext.RequestServices.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
+            var jti = context.Principal?.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Jti)?.Value;
+
+            if (jti != null && cache.TryGetValue($"blocklist:{jti}", out _))
+            {
+                context.Fail("Token has been revoked.");
+            }
+            return Task.CompletedTask;
+        }
+    };
 });
 builder.Services.AddHangfire(configuration => configuration
     .SetDataCompatibilityLevel(CompatibilityLevel.Version_170)
@@ -97,6 +112,7 @@ builder.Services.AddScoped<IAuthPolicyService, AuthPolicyService>();
 builder.Services.AddScoped<ISmsService, SmsService>();
 builder.Services.AddScoped<INotificationEngine, NotificationEngine>();
 builder.Services.AddScoped<DatabaseSeeder>();
+builder.Services.AddHostedService<Wasil.Service.Services.SystemHeartbeatService>();
 
 var app = builder.Build();
 

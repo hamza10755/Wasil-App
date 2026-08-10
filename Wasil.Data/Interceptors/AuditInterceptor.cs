@@ -38,24 +38,15 @@ public class AuditInterceptor : SaveChangesInterceptor
         Guid? userId = null;
         try
         {
-            var serviceProvider = ((IInfrastructure<IServiceProvider>)context).Instance;
-            var currentUserType = Type.GetType("Wasil.Data.Interfaces.ICurrentUser, Wasil.Service");
-            if (currentUserType != null)
+            var currentUserService = context.GetService<Wasil.Data.Interfaces.ICurrentUser>();
+            if (currentUserService != null)
             {
-                var currentUserService = serviceProvider.GetService(currentUserType);
-                if (currentUserService != null)
-                {
-                    var userIdProp = currentUserService.GetType().GetProperty("UserId");
-                    if (userIdProp != null)
-                    {
-                        userId = (Guid?)userIdProp.GetValue(currentUserService);
-                    }
-                }
+                userId = currentUserService.UserId;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Fallback if the service cannot be resolved
+            Console.WriteLine($"[AuditDebug] Exception resolving ICurrentUser: {ex.Message}");
         }
 
         var currentTime = DateTime.UtcNow;

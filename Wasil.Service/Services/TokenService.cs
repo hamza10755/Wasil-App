@@ -34,7 +34,8 @@ public class TokenService : ITokenService
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new Claim(ClaimTypes.Role, user.Role.ToString())
+            new Claim(ClaimTypes.Role, user.Role.ToString()),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
         // if (!string.IsNullOrEmpty(user.Email))
@@ -97,7 +98,6 @@ public class TokenService : ITokenService
         var now = DateTime.UtcNow;
         var sevenDaysAgo = now.AddDays(-7);
 
-        // Delete expired tokens OR tokens revoked more than 7 days ago
         var expiredOrOldRevokedTokens = await _dbContext.RefreshTokens
             .Where(t => t.ExpiresOn <= now || (t.RevokedOn != null && t.RevokedOn <= sevenDaysAgo))
             .ToListAsync();
