@@ -13,6 +13,11 @@ using Wasil.Api.Middleware;
 using Serilog;
 using Hangfire;
 using Hangfire.SqlServer;
+using Wasil.Service.Messaging;
+using Wasil.Service.Messaging.Consumers;
+using MassTransit;
+
+
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -113,6 +118,32 @@ builder.Services.AddScoped<ISmsService, SmsService>();
 builder.Services.AddScoped<INotificationEngine, NotificationEngine>();
 builder.Services.AddScoped<DatabaseSeeder>();
 builder.Services.AddHostedService<Wasil.Service.Services.SystemHeartbeatService>();
+builder.Services.AddSingleton<RabbitMqEventPublisher>();
+builder.Services.AddHostedService<AnalyticsConsumerService>();
+builder.Services.AddHostedService<ConfirmationWorkerService>();
+
+builder.Services.AddMassTransit(x =>
+{
+    x.AddConsumer<EmailUserRegisteredConsumer>();
+    x.AddConsumer<AnalyticsUserRegisteredConsumer>();
+
+    x.UsingRabbitMq((context, cfg) =>
+    {
+        var rabbitSection = context.GetRequiredService<IConfiguration>().GetSection("RabbitMQ");
+        var host = rabbitSection["HostName"] ?? "localhost";
+        var user = rabbitSection["UserName"] ?? "guest";
+        var pass = rabbitSection["Password"] ?? "guest";
+
+        cfg.Host(host, "/", h =>
+        {
+            h.Username(user);
+            h.Password(pass);
+        });
+
+        cfg.ConfigureEndpoints(context);
+    });
+});
+
 
 var app = builder.Build();
 
