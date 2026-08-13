@@ -32,10 +32,13 @@ public class OrderService : IOrderService
         { OrderStatus.Cancelled, new() }
     };
 
-    public OrderService(WasilDbContext dbContext, ILogger<OrderService> logger)
+    private readonly INotificationEngine _notificationEngine;
+
+    public OrderService(WasilDbContext dbContext, ILogger<OrderService> logger, INotificationEngine notificationEngine)
     {
         _dbContext = dbContext;
         _logger = logger;
+        _notificationEngine = notificationEngine;
     }
 
     private string Generate12DigitOrderCode()
@@ -297,6 +300,7 @@ public class OrderService : IOrderService
             .Take(pageSize)
             .Select(o => new CustomerOrderHistoryDto
             {
+                Id = o.Id,
                 OrderCode = o.OrderCode,
                 Date = o.CreatedAtUtc,
                 Status = o.Status.ToString(),
@@ -448,5 +452,152 @@ public class OrderService : IOrderService
             TopProductsLast30Days = topProducts,
             ActiveStatusCounts = activeCounts
         };
+     }
+
+    public async Task CancelStalePendingOrdersAsync()
+{
+    var cutoff = DateTime.UtcNow.AddMinutes(-30);
+    
+    var staleOrderIds = await _dbContext.Orders
+        .Where(o => o.Status == OrderStatus.Pending && o.CreatedAtUtc < cutoff)
+        .Select(o => o.Id)
+        .ToListAsync();
+
+    if (!staleOrderIds.Any())
+    {
+        return;
+    }
+
+    var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
+
+    foreach (var orderId in staleOrderIds)
+    {
+        await executionStrategy.ExecuteAsync(async () =>
+        {
+            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            try
+            {
+                var order = await _dbContext.Orders
+                    .FromSqlRaw("SELECT * FROM [Order] WITH (UPDLOCK, ROWLOCK) WHERE orderId = {0}", orderId)
+                    .Include(o => o.OrderLines)
+                    .ThenInclude(ol => ol.Product)
+                    .FirstOrDefaultAsync();
+
+                if (order == null || order.Status != OrderStatus.Pending)
+                {
+                    await transaction.RollbackAsync();
+                    return;
+                }
+
+                foreach (var line in order.OrderLines)
+                {
+                    if (line.Product != null)
+                    {
+                        line.Product.StockQuantity += line.Quantity;
+                    }
+                }
+
+                order.Status = OrderStatus.Cancelled;
+
+                var history = new OrderStatusHistory
+                {
+                    OrderId = order.Id,
+                    OldStatus = OrderStatus.Pending.ToString(),
+                    NewStatus = OrderStatus.Cancelled.ToString(),
+                    TimestampUtc = DateTime.UtcNow
+                };
+                
+                _dbContext.OrderStatusHistories.Add(history);
+                await _dbContext.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+                _logger.LogInformation("System background job successfully cancelled stale pending Order ID {OrderId}.", orderId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error occurred during system background cancellation of Order ID {OrderId}.", orderId);
+                await transaction.RollbackAsync();
+                
+                foreach (var entry in _dbContext.ChangeTracker.Entries().Where(e => e.State != EntityState.Unchanged))
+                {
+                    entry.State = EntityState.Detached;
+                }
+                
+                throw;
+            }
+        });
+    }
+}
+
+    public async Task GenerateNightlySalesReportAsync(Hangfire.Server.PerformContext? performContext)
+    {
+        var yesterday = DateTime.UtcNow.Date.AddDays(-1);
+        var startOfYesterday = yesterday;
+        var endOfYesterday = yesterday.AddDays(1).AddTicks(-1);
+
+        var stores = await _dbContext.Stores.ToListAsync();
+
+        foreach (var store in stores)
+        {
+            var storeOrders = await _dbContext.Orders
+                .Where(o => o.StoreId == store.Id && o.Status == OrderStatus.Delivered && o.CreatedAtUtc >= startOfYesterday && o.CreatedAtUtc <= endOfYesterday)
+                .Include(o => o.OrderLines)
+                .ToListAsync();
+
+            var topProduct = storeOrders
+                .SelectMany(o => o.OrderLines)
+                .GroupBy(ol => ol.ProductName)
+                .Select(g => new { Name = g.Key, Quantity = g.Sum(ol => ol.Quantity) })
+                .OrderByDescending(x => x.Quantity)
+                .FirstOrDefault();
+
+            string topProductName = topProduct?.Name ?? "N/A";
+
+            var report = new DailyReport
+            {
+                StoreId = store.Id,
+                ReportDate = yesterday,
+                OrderCount = storeOrders.Count,
+                TotalRevenue = storeOrders.Sum(o => o.Total),
+                TopSellingProductName = topProductName
+            };
+
+            var existingReport = await _dbContext.DailyReports
+                .FirstOrDefaultAsync(r => r.StoreId == store.Id && r.ReportDate == yesterday);
+
+            if (existingReport != null)
+            {
+                existingReport.OrderCount = report.OrderCount;
+                existingReport.TotalRevenue = report.TotalRevenue;
+                existingReport.TopSellingProductName = report.TopSellingProductName;
+            }
+            else
+            {
+                _dbContext.DailyReports.Add(report);
+            }
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        if (performContext != null)
+        {
+            Hangfire.BackgroundJob.ContinueWith<IOrderService>(
+                performContext.BackgroundJob.Id,
+                x => x.SendStoreReportsForDateAsync(yesterday)
+            );
+        }
+    }
+
+    public async Task SendStoreReportsForDateAsync(DateTime date)
+    {
+        var reports = await _dbContext.DailyReports
+            .Where(r => r.ReportDate.Date == date.Date)
+            .ToListAsync();
+
+        foreach (var report in reports)
+        {
+            var summary = $"Date: {report.ReportDate:yyyy-MM-dd}, Orders: {report.OrderCount}, Revenue: {report.TotalRevenue:C}, Top Product: {report.TopSellingProductName}";
+            await _notificationEngine.SendStoreReportAsync(report.StoreId, summary);
+        }
     }
 }

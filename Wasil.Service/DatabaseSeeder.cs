@@ -174,6 +174,8 @@ public class DatabaseSeeder
     private void ClearDatabase()
     {
         Console.WriteLine("Clearing existing database records...");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [DailyReport]");
+        _context.Database.ExecuteSqlRaw("DELETE FROM [IdempotentRequests]");
         _context.Database.ExecuteSqlRaw("DELETE FROM [AuditTrail]");
         _context.Database.ExecuteSqlRaw("DELETE FROM [RefreshTokens]");
         _context.Database.ExecuteSqlRaw("DELETE FROM [OrderLineModifier]");

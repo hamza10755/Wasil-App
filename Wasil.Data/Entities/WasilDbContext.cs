@@ -47,6 +47,8 @@ public partial class WasilDbContext : DbContext
 
     public virtual DbSet<IdempotentRequest> IdempotentRequests { get; set; }
 
+    public virtual DbSet<DailyReport> DailyReports { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WasilDbContext).Assembly);
@@ -229,6 +231,17 @@ public partial class WasilDbContext : DbContext
             entity.HasOne(d => d.Store).WithMany(p => p.StoreHours)
                 .HasForeignKey(d => d.StoreId)
                 .HasConstraintName("FK_StoreHours_Store");
+        });
+
+        modelBuilder.Entity<DailyReport>(entity =>
+        {
+            entity.ToTable("DailyReport");
+            entity.Property(e => e.TotalRevenue).HasColumnType("decimal(18,2)").IsRequired();
+            entity.Property(e => e.TopSellingProductName).HasMaxLength(150);
+            entity.HasOne(d => d.Store)
+                .WithMany()
+                .HasForeignKey(d => d.StoreId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         OnModelCreatingPartial(modelBuilder);
