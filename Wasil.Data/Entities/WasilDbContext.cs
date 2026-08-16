@@ -49,6 +49,10 @@ public partial class WasilDbContext : DbContext
 
     public virtual DbSet<DailyReport> DailyReports { get; set; }
 
+    public virtual DbSet<StoreAnalytics> StoreAnalytics { get; set; }
+
+    public virtual DbSet<ProcessedMessage> ProcessedMessages { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WasilDbContext).Assembly);
