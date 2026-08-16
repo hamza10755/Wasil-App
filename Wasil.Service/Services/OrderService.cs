@@ -10,12 +10,16 @@ using Wasil.Service.Interfaces;
 using Wasil.Service.DTOs;
 using Wasil.Service.DTOs.Shared;
 
+using Wasil.Service.Messaging;
+using Wasil.Service.Messaging.Events;
+
 namespace Wasil.Service.Services;
 
 public class OrderService : IOrderService
 {
     private readonly WasilDbContext _dbContext;
     private readonly ILogger<OrderService> _logger;
+    private readonly RabbitMqEventPublisher _eventPublisher;
     
     private static int _orderCounter = 0;
     public static bool ForceCollisionForTesting { get; set; } = 
@@ -34,11 +38,16 @@ public class OrderService : IOrderService
 
     private readonly INotificationEngine _notificationEngine;
 
-    public OrderService(WasilDbContext dbContext, ILogger<OrderService> logger, INotificationEngine notificationEngine)
+    public OrderService(
+        WasilDbContext dbContext, 
+        ILogger<OrderService> logger, 
+        INotificationEngine notificationEngine,
+        RabbitMqEventPublisher eventPublisher)
     {
         _dbContext = dbContext;
         _logger = logger;
         _notificationEngine = notificationEngine;
+        _eventPublisher = eventPublisher;
     }
 
     private string Generate12DigitOrderCode()
@@ -206,6 +215,27 @@ public class OrderService : IOrderService
                 }
 
                 _logger.LogInformation("Successfully placed Order ID {OrderId} with Code {OrderCode}.", newOrder.Id, newOrder.OrderCode);
+
+                // --- TEMPORARY DAY 6 PART 0 CRASH TEST ---
+                var orderPlacedEvent = new OrderPlacedEvent
+                {
+                    MessageId = Guid.NewGuid(),
+                    EventName = "OrderPlaced",
+                    Version = 1,
+                    TimestampUtc = DateTime.UtcNow,
+                    OrderId = newOrder.Id,
+                    StoreId = newOrder.StoreId,
+                    CustomerId = newOrder.CustomerId,
+                    TotalAmount = newOrder.Total
+                };
+
+                // Kill the process to simulate hard crash before publishing event
+                Environment.Exit(1);
+
+                // Publish (unreachable)
+                _eventPublisher.Publish(orderPlacedEvent.MessageId, orderPlacedEvent);
+                // -----------------------------------------
+
                 return newOrder;
             }
             catch (Exception ex)
