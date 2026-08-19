@@ -15,29 +15,19 @@ namespace Wasil.Service.Messaging.Consumers;
 
 public class ConfirmationWorkerService : BackgroundService
 {
+    private readonly RabbitMqConnectionManager _connectionManager;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<ConfirmationWorkerService> _logger;
-    private readonly ConnectionFactory _connectionFactory;
-    private IConnection? _connection;
     private IModel? _channel;
 
     public ConfirmationWorkerService(
+        RabbitMqConnectionManager connectionManager,
         IConfiguration configuration,
         ILogger<ConfirmationWorkerService> logger)
     {
+        _connectionManager = connectionManager;
+        _configuration = configuration;
         _logger = logger;
-
-        var rabbitSection = configuration.GetSection("RabbitMQ");
-        var hostName = rabbitSection["HostName"] ?? "localhost";
-        var userName = rabbitSection["UserName"] ?? "guest";
-        var password = rabbitSection["Password"] ?? "guest";
-
-        _connectionFactory = new ConnectionFactory
-        {
-            HostName = hostName,
-            UserName = userName,
-            Password = password,
-            AutomaticRecoveryEnabled = true
-        };
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -46,8 +36,8 @@ public class ConfirmationWorkerService : BackgroundService
 
         try
         {
-            _connection = _connectionFactory.CreateConnection();
-            _channel = _connection.CreateModel();
+            var connection = _connectionManager.GetConnection();
+            _channel = connection.CreateModel();
 
             var dlxExchange = "order.confirmation.dlx";
             var dlqQueue = "order.confirmation.dlq";
@@ -76,7 +66,22 @@ public class ConfirmationWorkerService : BackgroundService
                 arguments: queueArgs
             );
 
-            _channel.BasicQos(prefetchSize: 0, prefetchCount: 1, global: false);
+            ushort prefetchCount = 1;
+            var prefetchConfig = _configuration["RabbitMQ:PrefetchCount"];
+            if (ushort.TryParse(prefetchConfig, out var parsedPrefetch))
+            {
+                prefetchCount = parsedPrefetch;
+            }
+
+            if (prefetchCount > 0)
+            {
+                _logger.LogInformation("Setting BasicQos prefetchCount = {PrefetchCount}", prefetchCount);
+                _channel.BasicQos(prefetchSize: 0, prefetchCount: prefetchCount, global: false);
+            }
+            else
+            {
+                _logger.LogInformation("No prefetch limit set (QoS disabled / Unlimited Prefetch).");
+            }
 
             var consumer = new EventingBasicConsumer(_channel);
             consumer.Received += (model, ea) =>
@@ -172,12 +177,6 @@ public class ConfirmationWorkerService : BackgroundService
         {
             _channel.Close();
             _channel.Dispose();
-        }
-
-        if (_connection is not null)
-        {
-            _connection.Close();
-            _connection.Dispose();
         }
 
         return base.StopAsync(cancellationToken);

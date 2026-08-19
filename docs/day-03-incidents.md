@@ -239,7 +239,26 @@ We ran Scenario 6 deadlock concurrency test:
 - **Responses**: All 40 requests completed successfully.
 - **Logs**: The SQL Server logs verified that 0 deadlock exceptions were thrown during the run.
 
+## Incident #7: The Dual-Write Gap (Day 6 Outbox)
 
+### 1. Experiment
+- **Endpoint**: `POST /api/v1/orders`
+- **Starting State**: Application running normally, saving orders and publishing events directly from the controller.
+- **Action**: Inject `Environment.Exit(1)` immediately after database context `SaveChanges()` commits, but before the event is published to RabbitMQ. Send one order.
 
+### 2. Expected
+The database transaction and the RabbitMQ publishing must happen as a single atomic unit. If the server crashes, either the order is not saved and no event is sent, or both succeed.
 
+### 3. Observed
+The order was successfully saved to SQL Server, but the event was never published to RabbitMQ. The server crashed silently, leaving the order in a "Pending" status forever. No errors or logs captured the failure.
 
+### 4. Why
+SQL Server and RabbitMQ are two different systems with no shared transaction coordinator. If the application dies in the gap between the two writes, the second write is lost.
+
+### 5. Fix
+We removed direct publishing from the controller/service request path. Instead, we write the event details into an `OutboxMessage` record in the same database transaction as the order, and configured a background `OutboxRelayService` to poll and publish these messages asynchronously.
+- **Why this closes the race**: Both rows are committed to SQL Server in a single atomic database transaction. If the app crashes, neither or both are saved.
+- **Cost**: Adds minor storage overhead and a small delay (up to 200ms) before the event reaches the broker.
+
+### 6. Proof
+We ran the crash test with `Environment.Exit(1)` injected after `transaction.Commit()`. The app crashed. On startup, the `OutboxRelayService` immediately detected the unsent outbox record, published it successfully, and the consumer updated the tally. Nothing was lost.
