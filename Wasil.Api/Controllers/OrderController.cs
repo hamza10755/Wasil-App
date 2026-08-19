@@ -9,6 +9,8 @@ using Wasil.Service.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using Wasil.Service.Messaging;
+using Wasil.Service.Messaging.Events;
 
 namespace Wasil.Api.Controllers;
 
@@ -20,15 +22,34 @@ public class OrderController : ControllerBase
     private readonly IOrderService _orderService;
     private readonly WasilDbContext _context;
     private readonly IAuthPolicyService _authPolicyService;
+    private readonly RabbitMqEventPublisher _eventPublisher;
 
     public OrderController(
         IOrderService orderService,
         WasilDbContext context,
-        IAuthPolicyService authPolicyService)
+        IAuthPolicyService authPolicyService,
+        RabbitMqEventPublisher eventPublisher)
     {
         _orderService = orderService;
         _context = context;
         _authPolicyService = authPolicyService;
+        _eventPublisher = eventPublisher;
+    }
+
+    [HttpPost("test/publish-confirmations")]
+    [Authorize(Roles = "Admin")]
+    public IActionResult PublishConfirmations([FromQuery] int count = 30)
+    {
+        for (int i = 1; i <= count; i++)
+        {
+            var msg = new SendOrderConfirmationMessage
+            {
+                OrderId = i,
+                SequenceNumber = i
+            };
+            _eventPublisher.PublishToQueue("order.confirmation.work-queue", msg.MessageId, msg);
+        }
+        return Ok(new { message = $"Successfully published {count} confirmation messages." });
     }
 
     [HttpPost]

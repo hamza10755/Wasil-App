@@ -52,6 +52,8 @@ public partial class WasilDbContext : DbContext
     public virtual DbSet<StoreAnalytics> StoreAnalytics { get; set; }
 
     public virtual DbSet<ProcessedMessage> ProcessedMessages { get; set; }
+    
+    public virtual DbSet<OutboxMessage> OutboxMessages { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -246,6 +248,14 @@ public partial class WasilDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(d => d.StoreId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OutboxMessage>(entity =>
+        {
+            entity.ToTable("OutboxMessage");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.SentAtUtc);
+            entity.HasIndex(e => e.MessageId).IsUnique();
         });
 
         OnModelCreatingPartial(modelBuilder);

@@ -203,20 +203,6 @@ public class OrderService : IOrderService
                     TimestampUtc = DateTime.UtcNow
                 };
                 _dbContext.OrderStatusHistories.Add(history);
-                _dbContext.SaveChanges();
-
-                if (transaction != null)
-                {
-                    transaction.Commit();
-                }
-                else
-                {
-                    _dbContext.SaveChanges();
-                }
-
-                _logger.LogInformation("Successfully placed Order ID {OrderId} with Code {OrderCode}.", newOrder.Id, newOrder.OrderCode);
-
-                // --- TEMPORARY DAY 6 PART 0 CRASH TEST ---
                 var orderPlacedEvent = new OrderPlacedEvent
                 {
                     MessageId = Guid.NewGuid(),
@@ -229,13 +215,23 @@ public class OrderService : IOrderService
                     TotalAmount = newOrder.Total
                 };
 
-                // Kill the process to simulate hard crash before publishing event
-                Environment.Exit(1);
+                var outboxMessage = new OutboxMessage
+                {
+                    MessageId = orderPlacedEvent.MessageId,
+                    EventType = orderPlacedEvent.EventName,
+                    Payload = System.Text.Json.JsonSerializer.Serialize(orderPlacedEvent),
+                    CreatedAtUtc = orderPlacedEvent.TimestampUtc,
+                    RetryCount = 0
+                };
+                _dbContext.OutboxMessages.Add(outboxMessage);
+                _dbContext.SaveChanges();
 
-                // Publish (unreachable)
-                _eventPublisher.Publish(orderPlacedEvent.MessageId, orderPlacedEvent);
-                // -----------------------------------------
-
+                if (transaction != null)
+                {
+                    transaction.Commit();
+                }
+                // Environment.Exit(1);
+                _logger.LogInformation("Successfully placed Order ID {OrderId} with Code {OrderCode} and queued Outbox message {MessageId}.", newOrder.Id, newOrder.OrderCode, outboxMessage.MessageId);
                 return newOrder;
             }
             catch (Exception ex)
@@ -404,10 +400,32 @@ public class OrderService : IOrderService
                     TimestampUtc = DateTime.UtcNow
                 };
                 _dbContext.OrderStatusHistories.Add(history);
+
+                var statusChangedEvent = new Wasil.Service.Messaging.Events.OrderStatusChangedEvent
+                {
+                    MessageId = Guid.NewGuid(),
+                    EventName = "OrderStatusChanged",
+                    Version = 1,
+                    TimestampUtc = DateTime.UtcNow,
+                    OrderId = order.Id,
+                    StoreId = order.StoreId,
+                    CustomerId = order.CustomerId,
+                    NewStatus = newStatus.ToString()
+                };
+
+                var outboxMessage = new OutboxMessage
+                {
+                    MessageId = statusChangedEvent.MessageId,
+                    EventType = statusChangedEvent.EventName,
+                    Payload = System.Text.Json.JsonSerializer.Serialize(statusChangedEvent),
+                    CreatedAtUtc = statusChangedEvent.TimestampUtc,
+                    RetryCount = 0
+                };
+                _dbContext.OutboxMessages.Add(outboxMessage);
                 _dbContext.SaveChanges();
 
                 transaction.Commit();
-                _logger.LogInformation("Order {OrderId} status successfully updated to {Status}.", orderId, newStatus);
+                _logger.LogInformation("Order {OrderId} status successfully updated to {Status} and queued Outbox message {MessageId}.", orderId, newStatus, outboxMessage.MessageId);
             }
             catch (Exception ex)
             {

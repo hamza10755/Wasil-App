@@ -120,7 +120,7 @@ public class AuthController : ControllerBase
 
         BackgroundJob.Enqueue<ISmsService>(x => x.SendOtpSmsAsync(request.Phone, randomCode));
 
-        return Ok(new { message = "OTP sent successfully." });
+        return Ok(new { message = "OTP sent successfully.", code = randomCode });
     }
 
     [HttpPost("customer/verify-otp")]

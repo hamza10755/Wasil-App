@@ -76,6 +76,18 @@ builder.Services.AddAuthentication(options =>
 
     options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
     {
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Query["access_token"];
+
+            var path = context.HttpContext.Request.Path;
+            if (!string.IsNullOrEmpty(accessToken) &&
+                path.StartsWithSegments("/hubs/orders"))
+            {
+                context.Token = accessToken;
+            }
+            return Task.CompletedTask;
+        },
         OnTokenValidated = context =>
         {
             var cache = context.HttpContext.RequestServices.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
@@ -89,6 +101,8 @@ builder.Services.AddAuthentication(options =>
         }
     };
 });
+
+builder.Services.AddSignalR();
 builder.Services.AddHangfire(configuration => configuration
     .SetDataCompatibilityLevel(CompatibilityLevel.Version_170)
     .UseSimpleAssemblyNameTypeSerializer()
@@ -118,9 +132,14 @@ builder.Services.AddScoped<ISmsService, SmsService>();
 builder.Services.AddScoped<INotificationEngine, NotificationEngine>();
 builder.Services.AddScoped<DatabaseSeeder>();
 builder.Services.AddHostedService<Wasil.Service.Services.SystemHeartbeatService>();
+builder.Services.AddSingleton<RabbitMqConnectionManager>();
 builder.Services.AddSingleton<RabbitMqEventPublisher>();
+builder.Services.AddSingleton(typeof(Wasil.Service.Messaging.Consumers.IdempotentConsumerWrapper<>));
 builder.Services.AddHostedService<AnalyticsConsumerService>();
 builder.Services.AddHostedService<ConfirmationWorkerService>();
+builder.Services.AddHostedService<Wasil.Service.Services.OutboxRelayService>();
+builder.Services.AddHostedService<Wasil.Service.Services.OutboxCleanupService>();
+builder.Services.AddHostedService<Wasil.Api.Hubs.OrderStatusNotificationService>();
 
 builder.Services.AddMassTransit(x =>
 {
@@ -177,6 +196,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -251,6 +271,42 @@ app.MapGet("/api/test/counts", (WasilDbContext db) => new
     OrderStatusHistories = db.OrderStatusHistories.Count(),
     AuditTrails = db.AuditTrails.Count()
 });
+
+app.UseWebSockets();
+
+app.Map("/ws/echo", async context =>
+{
+    if (context.WebSockets.IsWebSocketRequest)
+    {
+        using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+        var buffer = new byte[1024 * 4];
+        var receiveResult = await webSocket.ReceiveAsync(
+            new ArraySegment<byte>(buffer), System.Threading.CancellationToken.None);
+
+        while (!receiveResult.CloseStatus.HasValue)
+        {
+            await webSocket.SendAsync(
+                new ArraySegment<byte>(buffer, 0, receiveResult.Count),
+                receiveResult.MessageType,
+                receiveResult.EndOfMessage,
+                System.Threading.CancellationToken.None);
+
+            receiveResult = await webSocket.ReceiveAsync(
+                new ArraySegment<byte>(buffer), System.Threading.CancellationToken.None);
+        }
+
+        await webSocket.CloseAsync(
+            receiveResult.CloseStatus.Value,
+            receiveResult.CloseStatusDescription,
+            System.Threading.CancellationToken.None);
+    }
+    else
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+    }
+});
+
+app.MapHub<Wasil.Api.Hubs.OrderHub>("/hubs/orders");
 
 app.MapControllers();
 
