@@ -252,7 +252,7 @@ public partial class WasilDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-<<<<<<< HEAD
+
         modelBuilder.Entity<DeviceToken>(entity =>
         {
             entity.ToTable("DeviceToken");
@@ -261,14 +261,14 @@ public partial class WasilDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(d => d.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
-=======
+        });
         modelBuilder.Entity<OutboxMessage>(entity =>
         {
             entity.ToTable("OutboxMessage");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.SentAtUtc);
             entity.HasIndex(e => e.MessageId).IsUnique();
->>>>>>> main
+
         });
 
         OnModelCreatingPartial(modelBuilder);
