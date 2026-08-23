@@ -53,6 +53,8 @@ public partial class WasilDbContext : DbContext
 
     public virtual DbSet<ProcessedMessage> ProcessedMessages { get; set; }
 
+    public virtual DbSet<DeviceToken> DeviceTokens { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WasilDbContext).Assembly);
@@ -246,6 +248,16 @@ public partial class WasilDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(d => d.StoreId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DeviceToken>(entity =>
+        {
+            entity.ToTable("DeviceToken");
+            entity.HasIndex(e => e.Token).IsUnique();
+            entity.HasOne(d => d.User)
+                .WithMany()
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         OnModelCreatingPartial(modelBuilder);

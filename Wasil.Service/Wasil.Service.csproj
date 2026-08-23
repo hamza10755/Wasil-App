@@ -11,6 +11,7 @@
   <ItemGroup>
     <PackageReference Include="Bogus" Version="35.6.5" />
     <PackageReference Include="EFCore.BulkExtensions" Version="10.0.1" />
+    <PackageReference Include="FirebaseAdmin" Version="3.6.0" />
     <PackageReference Include="FluentValidation" Version="12.1.1" />
     <PackageReference Include="Hangfire.Core" Version="1.8.24" />
     <PackageReference Include="MassTransit" Version="8.2.5" />

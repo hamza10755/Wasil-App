@@ -16,6 +16,8 @@ using Hangfire.SqlServer;
 using Wasil.Service.Messaging;
 using Wasil.Service.Messaging.Consumers;
 using MassTransit;
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
 
 
 
@@ -144,6 +146,23 @@ builder.Services.AddMassTransit(x =>
     });
 });
 
+var firebaseCredentialsPath = "wasil-cb35c-firebase-adminsdk-fbsvc-9b9f25228d.json";
+if (!File.Exists(firebaseCredentialsPath))
+{
+    firebaseCredentialsPath = Path.Combine("..", firebaseCredentialsPath);
+}
+
+if (File.Exists(firebaseCredentialsPath))
+{
+    FirebaseApp.Create(new AppOptions()
+    {
+        Credential = GoogleCredential.FromFile(firebaseCredentialsPath)
+    });
+}
+else
+{
+    Console.WriteLine("[Firebase] Warning: Credentials file was not found. Firebase Admin will not be initialized.");
+}
 
 var app = builder.Build();
 
