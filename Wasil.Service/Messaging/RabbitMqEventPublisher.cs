@@ -9,29 +9,16 @@ namespace Wasil.Service.Messaging;
 
 public class RabbitMqEventPublisher : IDisposable
 {
-    private readonly ConnectionFactory _connectionFactory;
+    private readonly RabbitMqConnectionManager _connectionManager;
     private readonly ILogger<RabbitMqEventPublisher> _logger;
-    private IConnection? _connection;
     private IModel? _channel;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private bool _isDisposed;
 
-    public RabbitMqEventPublisher(IConfiguration configuration, ILogger<RabbitMqEventPublisher> logger)
+    public RabbitMqEventPublisher(RabbitMqConnectionManager connectionManager, ILogger<RabbitMqEventPublisher> logger)
     {
+        _connectionManager = connectionManager;
         _logger = logger;
-        
-        var rabbitSection = configuration.GetSection("RabbitMQ");
-        var hostName = rabbitSection["HostName"] ?? "localhost";
-        var userName = rabbitSection["UserName"] ?? "guest";
-        var password = rabbitSection["Password"] ?? "guest";
-
-        _connectionFactory = new ConnectionFactory
-        {
-            HostName = hostName,
-            UserName = userName,
-            Password = password,
-            AutomaticRecoveryEnabled = true
-        };
     }
 
     private void EnsureChannel()
@@ -45,9 +32,9 @@ public class RabbitMqEventPublisher : IDisposable
             if (_channel is not null) 
                 return;
 
-            _logger.LogInformation("Connecting to RabbitMQ...");
-            _connection = _connectionFactory.CreateConnection();
-            _channel = _connection.CreateModel();
+            _logger.LogInformation("Creating channel for RabbitMqEventPublisher...");
+            var connection = _connectionManager.GetConnection();
+            _channel = connection.CreateModel();
 
             _logger.LogInformation("Declaring durable fanout exchange: order.fanout");
             _channel.ExchangeDeclare(
@@ -58,7 +45,7 @@ public class RabbitMqEventPublisher : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to connect to RabbitMQ or declare exchange.");
+            _logger.LogError(ex, "Failed to create channel or declare exchange.");
             throw;
         }
         finally
@@ -93,6 +80,35 @@ public class RabbitMqEventPublisher : IDisposable
         );
     }
 
+    public void PublishToQueue<T>(string queueName, Guid messageId, T message, int attemptCount = 1)
+    {
+        EnsureChannel();
+
+        if (_channel == null)
+        {
+            throw new InvalidOperationException("RabbitMQ channel is not initialized.");
+        }
+
+        var body = JsonSerializer.SerializeToUtf8Bytes(message);
+        var properties = _channel.CreateBasicProperties();
+        properties.Persistent = true;
+        properties.MessageId = messageId.ToString();
+        properties.ContentType = "application/json";
+        properties.Headers = new Dictionary<string, object>
+        {
+            { "x-attempt-count", attemptCount }
+        };
+
+        _logger.LogInformation("Publishing message directly to queue {QueueName}: MessageId = {MessageId}", queueName, messageId);
+        
+        _channel.BasicPublish(
+            exchange: string.Empty,
+            routingKey: queueName,
+            basicProperties: properties,
+            body: body
+        );
+    }
+
     public void Dispose()
     {
         if (_isDisposed) 
@@ -103,12 +119,6 @@ public class RabbitMqEventPublisher : IDisposable
         {
             _channel.Close();
             _channel.Dispose();
-        }
-
-        if (_connection is not null)
-        {
-            _connection.Close();
-            _connection.Dispose();
         }
 
         _connectionLock.Dispose();

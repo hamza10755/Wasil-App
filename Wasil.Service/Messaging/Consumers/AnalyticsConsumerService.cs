@@ -15,34 +15,24 @@ using Wasil.Service.Messaging.Events;
 
 namespace Wasil.Service.Messaging.Consumers;
 
-public class AnalyticsConsumerService : BackgroundService
+public class AnalyticsConsumerService : BackgroundService, IIdempotentConsumer<OrderPlacedEvent>
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<AnalyticsConsumerService> _logger;
-    private readonly ConnectionFactory _connectionFactory;
-    private IConnection? _connection;
+    private readonly RabbitMqConnectionManager _connectionManager;
+    private readonly IdempotentConsumerWrapper<OrderPlacedEvent> _idempotentWrapper;
     private IModel? _channel;
 
     public AnalyticsConsumerService(
         IServiceProvider serviceProvider,
-        IConfiguration configuration,
-        ILogger<AnalyticsConsumerService> logger)
+        RabbitMqConnectionManager connectionManager,
+        ILogger<AnalyticsConsumerService> logger,
+        IdempotentConsumerWrapper<OrderPlacedEvent> idempotentWrapper)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
-
-        var rabbitSection = configuration.GetSection("RabbitMQ");
-        var hostName = rabbitSection["HostName"] ?? "localhost";
-        var userName = rabbitSection["UserName"] ?? "guest";
-        var password = rabbitSection["Password"] ?? "guest";
-
-        _connectionFactory = new ConnectionFactory
-        {
-            HostName = hostName,
-            UserName = userName,
-            Password = password,
-            AutomaticRecoveryEnabled = true
-        };
+        _connectionManager = connectionManager;
+        _idempotentWrapper = idempotentWrapper;
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -51,8 +41,8 @@ public class AnalyticsConsumerService : BackgroundService
 
         try
         {
-            _connection = _connectionFactory.CreateConnection();
-            _channel = _connection.CreateModel();
+            var connection = _connectionManager.GetConnection();
+            _channel = connection.CreateModel();
 
             _channel.ExchangeDeclare(
                 exchange: "order.fanout",
@@ -89,7 +79,12 @@ public class AnalyticsConsumerService : BackgroundService
                         var orderPlacedEvent = JsonSerializer.Deserialize<OrderPlacedEvent>(messageJson);
                         if (orderPlacedEvent != null)
                         {
-                            await UpdateAnalyticsIdempotentAsync(orderPlacedEvent, stoppingToken);
+                            await _idempotentWrapper.ExecuteIdempotentAsync(
+                                orderPlacedEvent.MessageId, 
+                                orderPlacedEvent, 
+                                this, 
+                                stoppingToken
+                            );
                         }
 
                         _channel.BasicAck(deliveryTag: ea.DeliveryTag, multiple: false);
@@ -116,82 +111,30 @@ public class AnalyticsConsumerService : BackgroundService
         return Task.CompletedTask;
     }
 
-    private async Task UpdateAnalyticsIdempotentAsync(OrderPlacedEvent ev, CancellationToken cancellationToken)
+    public async Task ProcessInTransactionAsync(OrderPlacedEvent ev, WasilDbContext dbContext, CancellationToken cancellationToken)
     {
-        using var scope = _serviceProvider.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<WasilDbContext>();
+        var analytics = await dbContext.StoreAnalytics
+            .FirstOrDefaultAsync(x => x.StoreId == ev.StoreId, cancellationToken);
 
-        using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-        try
+        if (analytics == null)
         {
-            var processedMessage = new ProcessedMessage
+            analytics = new StoreAnalytics
             {
-                MessageId = ev.MessageId,
-                ProcessedAtUtc = DateTime.UtcNow
+                StoreId = ev.StoreId,
+                TotalOrders = 1,
+                TotalRevenue = ev.TotalAmount,
+                LastUpdatedUtc = DateTime.UtcNow
             };
-            dbContext.ProcessedMessages.Add(processedMessage);
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            var analytics = await dbContext.StoreAnalytics
-                .FirstOrDefaultAsync(x => x.StoreId == ev.StoreId, cancellationToken);
-
-            if (analytics == null)
-            {
-                analytics = new StoreAnalytics
-                {
-                    StoreId = ev.StoreId,
-                    TotalOrders = 1,
-                    TotalRevenue = ev.TotalAmount,
-                    LastUpdatedUtc = DateTime.UtcNow
-                };
-                dbContext.StoreAnalytics.Add(analytics);
-            }
-            else
-            {
-                analytics.TotalOrders += 1;
-                analytics.TotalRevenue += ev.TotalAmount;
-                analytics.LastUpdatedUtc = DateTime.UtcNow;
-            }
-
-            await dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            
-            _logger.LogInformation("Successfully processed message {MessageId} and updated analytics for Store {StoreId}.", ev.MessageId, ev.StoreId);
+            dbContext.StoreAnalytics.Add(analytics);
         }
-        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        else
         {
-            _logger.LogWarning("Duplicate message detected: {MessageId}. Skipping processing.", ev.MessageId);
-            try
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            catch (Exception rollbackEx)
-            {
-                _logger.LogError(rollbackEx, "Failed to rollback transaction on duplicate message.");
-            }
+            analytics.TotalOrders += 1;
+            analytics.TotalRevenue += ev.TotalAmount;
+            analytics.LastUpdatedUtc = DateTime.UtcNow;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error processing message {MessageId}.", ev.MessageId);
-            try
-            {
-                await transaction.RollbackAsync(cancellationToken);
-            }
-            catch (Exception rollbackEx)
-            {
-                _logger.LogError(rollbackEx, "Failed to rollback transaction on error.");
-            }
-            throw;
-        }
-    }
 
-    private bool IsUniqueConstraintViolation(DbUpdateException dbUpdateEx)
-    {
-        if (dbUpdateEx.InnerException is Microsoft.Data.SqlClient.SqlException sqlEx)
-        {
-            return sqlEx.Number == 2601 || sqlEx.Number == 2627;
-        }
-        return false;
+        _logger.LogInformation("Analytics business logic: Incrementing store {StoreId} order count.", ev.StoreId);
     }
 
     public override Task StopAsync(CancellationToken cancellationToken)
@@ -200,12 +143,6 @@ public class AnalyticsConsumerService : BackgroundService
         {
             _channel.Close();
             _channel.Dispose();
-        }
-
-        if (_connection is not null)
-        {
-            _connection.Close();
-            _connection.Dispose();
         }
 
         return base.StopAsync(cancellationToken);
