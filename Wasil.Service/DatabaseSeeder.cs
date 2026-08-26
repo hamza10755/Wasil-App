@@ -135,21 +135,249 @@ public class DatabaseSeeder
                     UserId = userId,
                     FirstName = firstName,
                     LastName = lastName,
-                    CreatedAtUtc = DateTime.UtcNow
+                    CreatedAtUtc = DateTime.UtcNow,
+                    MarketingNotificationsEnabled = false,
+                    Timezone = "UTC"
                 };
                 customersBatch.Add(customer);
             }
 
             _context.BulkInsert(usersBatch);
-            
-            _context.BulkInsert(customersBatch);
-            
+            _context.BulkInsert(customersBatch, new BulkConfig { SetOutputIdentity = true });
             allCustomers.AddRange(customersBatch);
         }
 
         Console.WriteLine($"Seeded {count} Users and Customers in {sw.ElapsedMilliseconds}ms");
         return allCustomers;
     }
+
+    private List<Address> SeedAddresses(List<Customer> customers)
+    {
+        var sw = Stopwatch.StartNew();
+        var faker = new Faker();
+        var addresses = new List<Address>();
+
+        foreach (var customer in customers)
+        {
+            int count = faker.Random.Number(1, 2);
+            for (int k = 0; k < count; k++)
+            {
+                addresses.Add(new Address
+                {
+                    CustomerId = customer.Id,
+                    Street = faker.Address.StreetAddress(),
+                    City = faker.Address.City(),
+                    ZipCode = faker.Address.ZipCode(),
+                    CreatedAtUtc = DateTime.UtcNow
+                });
+            }
+        }
+
+        _context.BulkInsert(addresses, new BulkConfig { SetOutputIdentity = true });
+        Console.WriteLine($"Seeded {addresses.Count} Addresses in {sw.ElapsedMilliseconds}ms");
+        return addresses;
+    }
+
+    private void SeedOrdersAndLines(List<Customer> customers, List<Store> stores, int totalOrders)
+    {
+        var sw = Stopwatch.StartNew();
+        var faker = new Faker();
+
+        Console.WriteLine("Loading seeded products for order generation...");
+        var products = _context.Products.AsNoTracking().ToList();
+        var productsByStore = products.GroupBy(p => p.StoreId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var orderStatuses = new[] 
+        { 
+            OrderStatus.Delivered, OrderStatus.Delivered, OrderStatus.Delivered, 
+            OrderStatus.Delivered, OrderStatus.Delivered, OrderStatus.Delivered, 
+            OrderStatus.Cancelled, OrderStatus.Cancelled, OrderStatus.Preparing, OrderStatus.Pending 
+        };
+
+        var counters = new Dictionary<string, int>();
+        var generatedCodes = new HashSet<string>();
+        int batchSize = 25000;
+        int seededCount = 0;
+
+
+        while (seededCount < totalOrders)
+        {
+            int currentBatch = Math.Min(batchSize, totalOrders - seededCount);
+            var orders = new List<Order>(currentBatch);
+            var linesMap = new List<List<OrderLine>>(currentBatch);
+            var historyMap = new List<List<OrderStatusHistory>>(currentBatch);
+
+            for (int k = 0; k < currentBatch; k++)
+            {
+                int customerIdx = (int)(Math.Pow(faker.Random.Double(), 2) * customers.Count);
+                var customer = customers[customerIdx];
+
+                var store = faker.PickRandom(stores);
+                if (!productsByStore.TryGetValue(store.Id, out var storeProducts) || !storeProducts.Any())
+                {
+                    k--; // Retry
+                    continue;
+                }
+
+                var orderDate = DateTime.UtcNow.AddDays(-faker.Random.Number(0, 365));
+                var first4 = $"{orderDate:yyMM}";
+                if (!counters.TryGetValue(first4, out var seq)) seq = 0;
+                counters[first4] = (seq + 1) % 1000;
+
+                string orderCode;
+                do
+                {
+                    var middle5 = faker.Random.Number(10000, 99999).ToString("D5");
+                    orderCode = $"{first4}{middle5}{seq:D3}";
+                } while (!generatedCodes.Add(orderCode));
+
+
+                var order = new Order
+                {
+                    CustomerId = customer.Id,
+                    StoreId = store.Id,
+                    OrderCode = orderCode,
+                    Status = faker.PickRandom(orderStatuses),
+                    PaymentMethod = faker.Random.Bool(0.7f) ? PaymentMethod.Cash : PaymentMethod.Card,
+                    CreatedAtUtc = orderDate,
+                    DeliveryFee = 2.50m
+                };
+
+                int lineCount = faker.Random.Number(1, 8);
+                var selectedProducts = faker.PickRandom(storeProducts, lineCount).Distinct().ToList();
+                var orderLines = new List<OrderLine>();
+                decimal subtotal = 0;
+
+                foreach (var prod in selectedProducts)
+                {
+                    int qty = faker.Random.Number(1, 4);
+                    var lineTotalPrice = prod.Price * qty;
+                    subtotal += lineTotalPrice;
+
+                    orderLines.Add(new OrderLine
+                    {
+                        ProductId = prod.Id,
+                        ProductName = prod.Name,
+                        UnitPrice = prod.Price,
+                        Quantity = qty,
+                        TotalPrice = lineTotalPrice,
+                        CreatedAtUtc = orderDate
+                    });
+                }
+
+                order.Subtotal = subtotal;
+                order.Total = subtotal + order.DeliveryFee;
+
+                orders.Add(order);
+                linesMap.Add(orderLines);
+
+                var histories = new List<OrderStatusHistory>();
+                histories.Add(new OrderStatusHistory
+                {
+                    OldStatus = "None",
+                    NewStatus = OrderStatus.Pending.ToString(),
+                    TimestampUtc = orderDate,
+                    CreatedAtUtc = orderDate
+                });
+
+                if (order.Status == OrderStatus.Cancelled)
+                {
+                    histories.Add(new OrderStatusHistory
+                    {
+                        OldStatus = OrderStatus.Pending.ToString(),
+                        NewStatus = OrderStatus.Cancelled.ToString(),
+                        TimestampUtc = orderDate.AddMinutes(faker.Random.Number(2, 5)),
+                        CreatedAtUtc = orderDate
+                    });
+                }
+                else if (order.Status == OrderStatus.Delivered)
+                {
+                    histories.Add(new OrderStatusHistory
+                    {
+                        OldStatus = OrderStatus.Pending.ToString(),
+                        NewStatus = OrderStatus.Accepted.ToString(),
+                        TimestampUtc = orderDate.AddMinutes(5),
+                        CreatedAtUtc = orderDate
+                    });
+                    histories.Add(new OrderStatusHistory
+                    {
+                        OldStatus = OrderStatus.Accepted.ToString(),
+                        NewStatus = OrderStatus.Preparing.ToString(),
+                        TimestampUtc = orderDate.AddMinutes(15),
+                        CreatedAtUtc = orderDate
+                    });
+                    histories.Add(new OrderStatusHistory
+                    {
+                        OldStatus = OrderStatus.Preparing.ToString(),
+                        NewStatus = OrderStatus.OutForDelivery.ToString(),
+                        TimestampUtc = orderDate.AddMinutes(35),
+                        CreatedAtUtc = orderDate
+                    });
+                    histories.Add(new OrderStatusHistory
+                    {
+                        OldStatus = OrderStatus.OutForDelivery.ToString(),
+                        NewStatus = OrderStatus.Delivered.ToString(),
+                        TimestampUtc = orderDate.AddMinutes(50),
+                        CreatedAtUtc = orderDate
+                    });
+                }
+                else
+                {
+                    if (order.Status >= OrderStatus.Accepted)
+                    {
+                        histories.Add(new OrderStatusHistory
+                        {
+                            OldStatus = OrderStatus.Pending.ToString(),
+                            NewStatus = OrderStatus.Accepted.ToString(),
+                            TimestampUtc = orderDate.AddMinutes(5),
+                            CreatedAtUtc = orderDate
+                        });
+                    }
+                    if (order.Status >= OrderStatus.Preparing)
+                    {
+                        histories.Add(new OrderStatusHistory
+                        {
+                            OldStatus = OrderStatus.Accepted.ToString(),
+                            NewStatus = OrderStatus.Preparing.ToString(),
+                            TimestampUtc = orderDate.AddMinutes(15),
+                            CreatedAtUtc = orderDate
+                        });
+                    }
+                }
+
+                historyMap.Add(histories);
+            }
+
+            _context.BulkInsert(orders, new BulkConfig { SetOutputIdentity = true });
+
+            var allLines = new List<OrderLine>();
+            var allHistories = new List<OrderStatusHistory>();
+
+            for (int k = 0; k < orders.Count; k++)
+            {
+                var orderId = orders[k].Id;
+                foreach (var line in linesMap[k])
+                {
+                    line.OrderId = orderId;
+                    allLines.Add(line);
+                }
+                foreach (var history in historyMap[k])
+                {
+                    history.OrderId = orderId;
+                    allHistories.Add(history);
+                }
+            }
+
+            _context.BulkInsert(allLines);
+            _context.BulkInsert(allHistories);
+
+            seededCount += currentBatch;
+            Console.WriteLine($"Progress: Seeded {seededCount}/{totalOrders} Orders...");
+        }
+
+        Console.WriteLine($"Successfully seeded {totalOrders} Orders & OrderLines in {sw.Elapsed.TotalSeconds:F2} seconds.");
+    }
+
     public void SeedAdminUser()
     {
         if (_context.Users.Any(u => u.Role == Role.Admin))
@@ -171,6 +399,7 @@ public class DatabaseSeeder
         _context.SaveChanges();
         Console.WriteLine("Seeded Default Admin User (admin@wasil.com).");
     }
+
     private void ClearDatabase()
     {
         Console.WriteLine("Clearing existing database records...");
@@ -210,6 +439,8 @@ public class DatabaseSeeder
             var categories = SeedCategories(30);
             SeedProducts(stores, categories, 40000);
             var customers = SeedCustomers(20000);
+            var addresses = SeedAddresses(customers);
+            SeedOrdersAndLines(customers, stores, 300000);
         }
         finally
         {
