@@ -16,6 +16,8 @@ using Hangfire.SqlServer;
 using Wasil.Service.Messaging;
 using Wasil.Service.Messaging.Consumers;
 using MassTransit;
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
 
 
 
@@ -130,7 +132,9 @@ builder.Services.AddScoped<ICatalogService, CatalogService>();
 builder.Services.AddScoped<IAuthPolicyService, AuthPolicyService>();
 builder.Services.AddScoped<ISmsService, SmsService>();
 builder.Services.AddScoped<INotificationEngine, NotificationEngine>();
+builder.Services.AddScoped<Wasil.Service.Interfaces.ISocketNotificationService, Wasil.Api.Hubs.SocketNotificationService>();
 builder.Services.AddScoped<DatabaseSeeder>();
+
 builder.Services.AddHostedService<Wasil.Service.Services.SystemHeartbeatService>();
 builder.Services.AddSingleton<RabbitMqConnectionManager>();
 builder.Services.AddSingleton<RabbitMqEventPublisher>();
@@ -139,7 +143,8 @@ builder.Services.AddHostedService<AnalyticsConsumerService>();
 builder.Services.AddHostedService<ConfirmationWorkerService>();
 builder.Services.AddHostedService<Wasil.Service.Services.OutboxRelayService>();
 builder.Services.AddHostedService<Wasil.Service.Services.OutboxCleanupService>();
-builder.Services.AddHostedService<Wasil.Api.Hubs.OrderStatusNotificationService>();
+builder.Services.AddHostedService<Wasil.Service.Messaging.Consumers.OrderNotificationConsumer>();
+
 
 builder.Services.AddMassTransit(x =>
 {
@@ -163,6 +168,23 @@ builder.Services.AddMassTransit(x =>
     });
 });
 
+var firebaseCredentialsPath = "wasil-cb35c-firebase-adminsdk-fbsvc-9b9f25228d.json";
+if (!File.Exists(firebaseCredentialsPath))
+{
+    firebaseCredentialsPath = Path.Combine("..", firebaseCredentialsPath);
+}
+
+if (File.Exists(firebaseCredentialsPath))
+{
+    FirebaseApp.Create(new AppOptions()
+    {
+        Credential = GoogleCredential.FromFile(firebaseCredentialsPath)
+    });
+}
+else
+{
+    Console.WriteLine("[Firebase] Warning: Credentials file was not found. Firebase Admin will not be initialized.");
+}
 
 var app = builder.Build();
 
@@ -170,7 +192,16 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<WasilDbContext>();
     dbContext.Database.Migrate();
+
+    // Clear stale connection tracking records on startup to recover from previous crashed states
+    var allConnections = dbContext.UserConnections.ToList();
+    if (allConnections.Any())
+    {
+        dbContext.UserConnections.RemoveRange(allConnections);
+        dbContext.SaveChanges();
+    }
 }
+
 
 // Enable Global Exception Middleware
 app.UseMiddleware<GlobalExceptionMiddleware>();

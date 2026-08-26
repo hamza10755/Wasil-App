@@ -20,6 +20,11 @@ public partial class Customer: BaseEntity
 
     public Guid UserId { get; set; }
 
+    public bool MarketingNotificationsEnabled { get; set; } = false;
+
+    public string Timezone { get; set; } = "UTC";
+
+
     public virtual User User { get; set; } = null!;
     
     public virtual ICollection<Order> Orders { get; set; } = new List<Order>();

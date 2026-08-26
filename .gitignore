@@ -483,3 +483,7 @@ $RECYCLE.BIN/
 **/Migrations/
 
 # Ignore Entity Framework Core Migrations
+
+# Firebase Admin SDK Private Key
+wasil-cb35c-firebase-adminsdk-fbsvc-9b9f25228d.json
+
