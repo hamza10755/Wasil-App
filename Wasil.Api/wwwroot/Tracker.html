@@ -40,12 +40,33 @@
       });
 
       conn.onreconnected(() => write('reconnected'));
-      conn.onclose(() => write('connection closed'));
+      conn.onclose(() => {
+        write('connection closed');
+        if (window.heartbeatInterval) {
+          clearInterval(window.heartbeatInterval);
+          window.heartbeatInterval = null;
+        }
+      });
 
       await conn.start();
       write('connected');
       await conn.invoke('WatchOrder', orderId);
       write('watching order ' + orderId);
+
+      // Start the heartbeat loop every 30 seconds
+      if (window.heartbeatInterval) {
+        clearInterval(window.heartbeatInterval);
+      }
+      window.heartbeatInterval = setInterval(async () => {
+        if (conn && conn.state === signalR.HubConnectionState.Connected) {
+          try {
+            await conn.invoke('Heartbeat');
+            write('heartbeat sent');
+          } catch (err) {
+            console.error('Heartbeat failed:', err);
+          }
+        }
+      }, 30000);
     }
   </script>
 </body>

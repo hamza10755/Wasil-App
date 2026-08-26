@@ -18,6 +18,51 @@ public class OrderHub : Hub
         _currentUser = currentUser;
     }
 
+    public override async Task OnConnectedAsync()
+    {
+        var subClaim = Context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+                       ?? Context.User?.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+
+        if (subClaim != null && Guid.TryParse(subClaim, out var userId))
+        {
+            var userConnection = new UserConnection
+            {
+                UserId = userId,
+                ConnectionId = Context.ConnectionId,
+                AppInstanceId = ServerInstance.Id,
+                LastSeenAtUtc = DateTime.UtcNow,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+
+            _context.UserConnections.Add(userConnection);
+            await _context.SaveChangesAsync();
+        }
+
+        await base.OnConnectedAsync();
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        var conn = await _context.UserConnections.FirstOrDefaultAsync(c => c.ConnectionId == Context.ConnectionId);
+        if (conn != null)
+        {
+            _context.UserConnections.Remove(conn);
+            await _context.SaveChangesAsync();
+        }
+
+        await base.OnDisconnectedAsync(exception);
+    }
+
+    public async Task Heartbeat()
+    {
+        var conn = await _context.UserConnections.FirstOrDefaultAsync(c => c.ConnectionId == Context.ConnectionId);
+        if (conn != null)
+        {
+            conn.LastSeenAtUtc = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+        }
+    }
+
     public async Task WatchOrder(long orderId)
     {
         var subClaim = Context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
@@ -57,3 +102,4 @@ public class OrderHub : Hub
         }
     }
 }
+

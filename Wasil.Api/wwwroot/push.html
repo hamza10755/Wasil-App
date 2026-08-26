@@ -1,0 +1,148 @@
+<!-- <!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Push test</title></head>
+<body>
+  <h3>Push notification test</h3>
+  <p>Your login token: <input id="jwt" size="60"></p>
+  <button onclick="setup()">Turn on notifications</button>
+  <p>Device token: <code id="device"></code></p>
+  <ul id="log"></ul>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCuYS9OXsh2XSr_rinmYnHbnIrnztNrbpk", authDomain: "wasil-cb35c.firebaseapp.com", projectId: "wasil-cb35c",
+      messagingSenderId: "511407559793", appId: "1:511407559793:web:2c9ba97f561e17c6c337d0"
+    };
+    const VAPID_KEY = "BE7j0Bb2tqRfa2uxs2W9RcCGw7YkPc7VfugGqKOlLpsRFN4A99-ptxIWFJiRIjP7jWaskA3ihZICKehnEwhN0R4";
+
+    function log(t) {
+      const li = document.createElement('li');
+      li.textContent = new Date().toLocaleTimeString() + ' — ' + t;
+      document.getElementById('log').appendChild(li);
+    }
+
+    async function setup() {
+      firebase.initializeApp(firebaseConfig);
+      const messaging = firebase.messaging();
+
+      const permission = await Notification.requestPermission();
+      log('permission: ' + permission);
+      if (permission !== 'granted') return;
+
+      const deviceToken = await messaging.getToken({ vapidKey: VAPID_KEY });
+      document.getElementById('device').textContent = deviceToken;
+      log('got device token');
+
+      const res = await fetch('/api/devices/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + document.getElementById('jwt').value
+        },
+        body: JSON.stringify({ token: deviceToken, platform: 'web' })
+      });
+      log('register returned ' + res.status);
+
+      messaging.onMessage(m => log('app open: ' + JSON.stringify(m.notification)));
+    }
+  </script>
+</body>
+</html> -->
+
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Push test</title></head>
+<body>
+  <h3>Push notification test</h3>
+  <p>Your login token: <input id="jwt" size="60"></p>
+  <button onclick="setup()">Turn on notifications</button>
+  <button onclick="unregisterToken()" style="background-color: #ffcccc;">Unregister device</button>
+  <p>Device token: <code id="device"></code></p>
+  <ul id="log"></ul>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCuYS9OXsh2XSr_rinmYnHbnIrnztNrbpk", authDomain: "wasil-cb35c.firebaseapp.com", projectId: "wasil-cb35c",
+      messagingSenderId: "511407559793", appId: "1:511407559793:web:2c9ba97f561e17c6c337d0"
+    };
+    const VAPID_KEY = "BE7j0Bb2tqRfa2uxs2W9RcCGw7YkPc7VfugGqKOlLpsRFN4A99-ptxIWFJiRIjP7jWaskA3ihZICKehnEwhN0R4";
+
+    function log(t) {
+      const li = document.createElement('li');
+      li.textContent = new Date().toLocaleTimeString() + ' — ' + t;
+      document.getElementById('log').appendChild(li);
+    }
+
+    async function setup() {
+      firebase.initializeApp(firebaseConfig);
+
+      // Explicitly register and wait for the service worker so Chrome doesn't throw an error
+      let swRegistration = null;
+      if ('serviceWorker' in navigator) {
+        try {
+          swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+          await navigator.serviceWorker.ready;
+          log('Service Worker registered and ready.');
+        } catch (err) {
+          log('Service Worker registration failed: ' + err);
+          return;
+        }
+      }
+
+      const messaging = firebase.messaging();
+
+      const permission = await Notification.requestPermission();
+      log('permission: ' + permission);
+      if (permission !== 'granted') return;
+
+      // Pass the service worker registration to prevent the active worker error
+      const deviceToken = await messaging.getToken({ 
+        vapidKey: VAPID_KEY,
+        serviceWorkerRegistration: swRegistration 
+      });
+      
+      document.getElementById('device').textContent = deviceToken;
+      log('got device token');
+
+      // Updated to match your /api/notifications/register route
+      const res = await fetch('/api/notifications/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + document.getElementById('jwt').value
+        },
+        body: JSON.stringify({ token: deviceToken, platform: 'web' })
+      });
+      log('register returned ' + res.status);
+
+      messaging.onMessage(m => log('app open: ' + JSON.stringify(m.notification)));
+    }
+    async function unregisterToken() {
+      const token = document.getElementById('device').textContent;
+      if (!token) {
+        log('No device token to unregister.');
+        return;
+        }
+
+      const res = await fetch('/api/notifications/unregister', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + document.getElementById('jwt').value
+        },
+        body: JSON.stringify({ token: token })
+      });
+
+      log('unregister returned ' + res.status);
+      if (res.ok) {
+        document.getElementById('device').textContent = '';
+        log('Device successfully unregistered/deactivated.');
+      }
+    }
+  </script>
+</body>
+</html>

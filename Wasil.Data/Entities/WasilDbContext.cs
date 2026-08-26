@@ -57,6 +57,9 @@ public partial class WasilDbContext : DbContext
 
     public virtual DbSet<DeviceToken> DeviceTokens { get; set; }
 
+    public virtual DbSet<UserConnection> UserConnections { get; set; }
+
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(WasilDbContext).Assembly);
@@ -98,7 +101,10 @@ public partial class WasilDbContext : DbContext
             entity.Property(e => e.LastName).HasColumnName("lastName");
             entity.Property(e => e.Location).HasColumnName("location");
             entity.Property(e => e.PhoneNumber).HasColumnName("phoneNumber");
+            entity.Property(e => e.MarketingNotificationsEnabled).HasDefaultValue(false);
+            entity.Property(e => e.Timezone).HasMaxLength(50).HasDefaultValue("UTC");
         });
+
 
         modelBuilder.Entity<Driver>(entity =>
         {
@@ -270,6 +276,13 @@ public partial class WasilDbContext : DbContext
             entity.HasIndex(e => e.MessageId).IsUnique();
 
         });
+        modelBuilder.Entity<UserConnection>(entity =>
+        {
+            entity.ToTable("UserConnection");
+            entity.HasIndex(e => e.ConnectionId).IsUnique();
+            entity.HasIndex(e => e.UserId);
+        });
+
 
         OnModelCreatingPartial(modelBuilder);
     }
