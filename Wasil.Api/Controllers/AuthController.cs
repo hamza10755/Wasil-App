@@ -103,6 +103,28 @@ public class AuthController : ControllerBase
             _context.Customers.Add(customerProfile);
             await _context.SaveChangesAsync();
         }
+        else
+        {
+            var customerProfile = await _context.Customers
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.UserId == user.Id);
+
+            if (customerProfile == null)
+            {
+                customerProfile = new Customer
+                {
+                    UserId = user.Id,
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+                _context.Customers.Add(customerProfile);
+                await _context.SaveChangesAsync();
+            }
+            else if (customerProfile.IsDeleted)
+            {
+                customerProfile.IsDeleted = false;
+                await _context.SaveChangesAsync();
+            }
+        }
 
         var randomCode = request.Phone.StartsWith("999")
             ? "123456"

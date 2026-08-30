@@ -35,21 +35,31 @@ public class OutboxRelayService : BackgroundService
     {
         _logger.LogInformation("Outbox Relay Service started (Instance ID: {RelayId}).", _relayId);
 
+        int currentDelayMs = 50;
+        const int minDelayMs = 50;
+        const int maxDelayMs = 1000;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 int processedCount = await ProcessOutboxMessagesAsync(stoppingToken);
 
-                if (processedCount == 0)
+                if (processedCount > 0)
                 {
-                    await Task.Delay(TimeSpan.FromMilliseconds(200), stoppingToken);
+                    currentDelayMs = minDelayMs;
+                }
+                else
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(currentDelayMs), stoppingToken);
+                    currentDelayMs = Math.Min(currentDelayMs * 2, maxDelayMs);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error occurred during outbox relay processing cycle.");
                 await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                currentDelayMs = minDelayMs;
             }
         }
     }
