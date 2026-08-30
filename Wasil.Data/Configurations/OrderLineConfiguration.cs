@@ -23,6 +23,10 @@ public class OrderLineConfiguration : IEntityTypeConfiguration<OrderLine>
                .IsRequired()
                .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasIndex(ol => ol.OrderId)
+               .IncludeProperties(ol => new { ol.ProductId, ol.ProductName, ol.Quantity })
+               .HasDatabaseName("IX_OrderLine_OrderId_Includes");
+
         builder.HasOne(ol => ol.Product)
                .WithMany() 
                .HasForeignKey(ol => ol.ProductId)

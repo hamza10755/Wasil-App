@@ -19,5 +19,8 @@ public class AuditTrailConfiguration : IEntityTypeConfiguration<AuditTrail>
         builder.Property(at => at.ChangesJson).IsRequired();
         builder.Property(at => at.TimestampUtc).IsRequired();
         builder.Property(at => at.UserId).IsRequired(false);
+
+        builder.HasIndex(at => at.TimestampUtc)
+               .HasDatabaseName("IX_AuditTrail_TimestampUtc_DESC");
     }
 }

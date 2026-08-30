@@ -18,6 +18,7 @@ using Wasil.Service.Messaging.Consumers;
 using MassTransit;
 using FirebaseAdmin;
 using Google.Apis.Auth.OAuth2;
+using EFCore.BulkExtensions;
 
 
 
@@ -289,18 +290,102 @@ app.MapDelete("/api/test/customers/{id:int}", (int id, WasilDbContext db) =>
     return Results.Ok($"Customer {id} has been soft-deleted. Check the AuditTrail table!");
 });
 
+app.MapGet("/api/test/debug-customer/{id:int}", (int id, WasilDbContext db) =>
+{
+    var customer = db.Customers.Find(id);
+    if (customer == null) return Results.NotFound($"Customer {id} not found.");
+    var user = db.Users.Find(customer.UserId);
+    return Results.Ok(new
+    {
+        CustomerId = customer.Id,
+        CustomerUserId = customer.UserId,
+        UserPhone = user?.Phone,
+        UserEmail = user?.Email,
+        UserRole = user?.Role.ToString()
+    });
+});
+
+app.MapGet("/api/test/debug-customer-by-phone/{phone}", (string phone, WasilDbContext db) =>
+{
+    var user = db.Users.FirstOrDefault(u => u.Phone == phone && u.Role == Wasil.Data.Enums.Role.Customer);
+    if (user == null) return Results.NotFound($"User with phone {phone} not found.");
+    var customer = db.Customers.FirstOrDefault(c => c.UserId == user.Id);
+    return Results.Ok(new
+    {
+        UserId = user.Id,
+        UserPhone = user.Phone,
+        CustomerId = customer?.Id,
+        CustomerEmail = customer?.Email
+    });
+});
+
 app.MapGet("/api/test/audit", (WasilDbContext db) => 
     db.AuditTrails.OrderByDescending(a => a.TimestampUtc).Take(20).ToList());
 
-app.MapGet("/api/test/counts", (WasilDbContext db) => new
+app.MapGet("/api/test/counts", (WasilDbContext db) =>
 {
-    Stores = db.Stores.Count(),
-    Customers = db.Customers.Count(),
-    Products = db.Products.Count(),
-    Categories = db.Categories.Count(),
-    Addresses = db.Addresses.Count(),
-    OrderStatusHistories = db.OrderStatusHistories.Count(),
-    AuditTrails = db.AuditTrails.Count()
+    var counts = db.Database.SqlQueryRaw<TableCountResult>(@"
+        SELECT 
+            t.name AS TableName,
+            SUM(p.rows) AS TotalRows
+        FROM 
+            sys.tables t
+        INNER JOIN      
+            sys.indexes i ON t.object_id = i.object_id
+        INNER JOIN 
+            sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
+        WHERE 
+            t.name IN ('Store', 'Customer', 'Product', 'Category', 'Address', 'OrderStatusHistory', 'AuditTrail')
+            AND i.index_id <= 1
+        GROUP BY 
+            t.name
+    ").ToList();
+
+    var dict = counts.ToDictionary(c => c.TableName, c => c.TotalRows);
+
+    return Results.Ok(new
+    {
+        Stores = dict.GetValueOrDefault("Store", 0L),
+        Customers = dict.GetValueOrDefault("Customer", 0L),
+        Products = dict.GetValueOrDefault("Product", 0L),
+        Categories = dict.GetValueOrDefault("Category", 0L),
+        Addresses = dict.GetValueOrDefault("Address", 0L),
+        OrderStatusHistories = dict.GetValueOrDefault("OrderStatusHistory", 0L),
+        AuditTrails = dict.GetValueOrDefault("AuditTrail", 0L)
+    });
+});
+
+app.MapPost("/api/test/benchmark-insert", async (WasilDbContext db) =>
+{
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var customer = await db.Customers.FirstOrDefaultAsync();
+    var store = await db.Stores.FirstOrDefaultAsync();
+    if (customer == null || store == null) return Results.BadRequest("Seed database first.");
+
+    var orders = new List<Order>();
+    for (int i = 0; i < 10000; i++)
+    {
+        orders.Add(new Order
+        {
+            CustomerId = customer.Id,
+            StoreId = store.Id,
+            OrderCode = "B" + Guid.NewGuid().ToString().Substring(0, 11),
+            Status = Wasil.Data.Enums.OrderStatus.Pending,
+            PaymentMethod = Wasil.Data.Enums.PaymentMethod.Cash,
+            CreatedAtUtc = DateTime.UtcNow,
+            DeliveryFee = 2.50m,
+            Subtotal = 10.00m,
+            Total = 12.50m
+        });
+    }
+
+    await db.BulkInsertAsync(orders);
+    sw.Stop();
+
+    // Clean up to prevent database pollution
+    await db.Database.ExecuteSqlRawAsync("DELETE FROM [Order] WHERE OrderCode LIKE 'B%'");
+
+    return Results.Ok(new { ElapsedMs = sw.ElapsedMilliseconds });
 });
 
 app.UseWebSockets();
@@ -342,3 +427,9 @@ app.MapHub<Wasil.Api.Hubs.OrderHub>("/hubs/orders");
 app.MapControllers();
 
 app.Run();
+
+public class TableCountResult
+{
+    public string TableName { get; set; } = null!;
+    public long TotalRows { get; set; }
+}

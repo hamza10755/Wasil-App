@@ -263,6 +263,7 @@ public class OrderService : IOrderService
             .Include(o => o.Store)
             .Include(o => o.OrderLines)
             .Include(o => o.StatusHistories)
+            .AsSplitQuery()
             .FirstOrDefault(o => o.Id == orderId);
 
         if (order == null)
@@ -316,14 +317,10 @@ public class OrderService : IOrderService
         var query = _dbContext.Orders
             .Where(o => o.CustomerId == customerId);
 
-        var totalCount = query.Count();
-
         var items = query
-            .Include(o => o.Store)
-            .Include(o => o.OrderLines)
             .OrderByDescending(o => o.CreatedAtUtc)
             .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .Take(pageSize + 1)
             .Select(o => new CustomerOrderHistoryDto
             {
                 Id = o.Id,
@@ -335,6 +332,14 @@ public class OrderService : IOrderService
                 Total = o.Total
             })
             .ToList();
+
+        var hasMore = items.Count > pageSize;
+        if (hasMore)
+        {
+            items.RemoveAt(pageSize);
+        }
+
+        var totalCount = hasMore ? (page * pageSize + 1) : ((page - 1) * pageSize + items.Count);
 
         return new PagedResultDto<CustomerOrderHistoryDto>
         {
@@ -446,6 +451,7 @@ public class OrderService : IOrderService
 
         var utcNow = DateTime.UtcNow;
         var todayUtc = new DateTime(utcNow.Year, utcNow.Month, utcNow.Day, 0, 0, 0, DateTimeKind.Utc);
+        var x = DateTime.UtcNow.Date;
         var thirtyDaysAgoUtc = utcNow.AddDays(-30);
 
         var ordersQuery = _dbContext.Orders
@@ -509,7 +515,9 @@ public class OrderService : IOrderService
     var staleOrderIds = await _dbContext.Orders
         .Where(o => o.Status == OrderStatus.Pending && o.CreatedAtUtc < cutoff)
         .Select(o => o.Id)
+        .Take(100)
         .ToListAsync();
+
 
     if (!staleOrderIds.Any())
     {
@@ -585,12 +593,20 @@ public class OrderService : IOrderService
 
         var stores = await _dbContext.Stores.ToListAsync();
 
+        var yesterdayOrders = await _dbContext.Orders
+            .Where(o => o.Status == OrderStatus.Delivered && o.CreatedAtUtc >= startOfYesterday && o.CreatedAtUtc <= endOfYesterday)
+            .Include(o => o.OrderLines)
+            .ToListAsync();
+
+        var ordersByStore = yesterdayOrders.GroupBy(o => o.StoreId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var existingReports = await _dbContext.DailyReports
+            .Where(r => r.ReportDate == yesterday)
+            .ToDictionaryAsync(r => r.StoreId);
+
         foreach (var store in stores)
         {
-            var storeOrders = await _dbContext.Orders
-                .Where(o => o.StoreId == store.Id && o.Status == OrderStatus.Delivered && o.CreatedAtUtc >= startOfYesterday && o.CreatedAtUtc <= endOfYesterday)
-                .Include(o => o.OrderLines)
-                .ToListAsync();
+            var storeOrders = ordersByStore.GetValueOrDefault(store.Id, new List<Order>());
 
             var topProduct = storeOrders
                 .SelectMany(o => o.OrderLines)
@@ -610,8 +626,7 @@ public class OrderService : IOrderService
                 TopSellingProductName = topProductName
             };
 
-            var existingReport = await _dbContext.DailyReports
-                .FirstOrDefaultAsync(r => r.StoreId == store.Id && r.ReportDate == yesterday);
+            var existingReport = existingReports.GetValueOrDefault(store.Id);
 
             if (existingReport != null)
             {
