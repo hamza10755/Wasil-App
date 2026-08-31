@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using Wasil.Service.DTOs;
 using Wasil.Service.DTOs.Shared;
 
@@ -6,8 +7,8 @@ namespace Wasil.Service.Interfaces;
 public interface ICatalogService
 {
     PagedResultDto<StoreDto> ListStores(string? name, int page, int pageSize);
-    StoreDetailDto GetStoreDetails(int storeId);
-    PagedResultDto<ProductDto> SearchProducts(
+    Task<StoreDetailDto> GetStoreDetailsAsync(int storeId);
+    Task<PagedResultDto<ProductDto>> SearchProductsAsync(
         int? storeId,
         int? categoryId,
         string? text,

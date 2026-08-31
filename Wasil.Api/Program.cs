@@ -19,6 +19,8 @@ using MassTransit;
 using FirebaseAdmin;
 using Google.Apis.Auth.OAuth2;
 using EFCore.BulkExtensions;
+using StackExchange.Redis;
+
 
 
 
@@ -139,6 +141,11 @@ builder.Services.AddScoped<DatabaseSeeder>();
 builder.Services.AddHostedService<Wasil.Service.Services.SystemHeartbeatService>();
 builder.Services.AddSingleton<RabbitMqConnectionManager>();
 builder.Services.AddSingleton<RabbitMqEventPublisher>();
+
+var redisConn = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379,abortConnect=false";
+builder.Services.AddSingleton<IConnectionMultiplexer>(ConnectionMultiplexer.Connect(redisConn));
+builder.Services.AddSingleton<CacheService>();
+
 builder.Services.AddSingleton(typeof(Wasil.Service.Messaging.Consumers.IdempotentConsumerWrapper<>));
 builder.Services.AddHostedService<AnalyticsConsumerService>();
 builder.Services.AddHostedService<ConfirmationWorkerService>();
@@ -362,10 +369,10 @@ app.MapPost("/api/test/benchmark-insert", async (WasilDbContext db) =>
     var store = await db.Stores.FirstOrDefaultAsync();
     if (customer == null || store == null) return Results.BadRequest("Seed database first.");
 
-    var orders = new List<Order>();
+    var orders = new List<Wasil.Data.Entities.Order>();
     for (int i = 0; i < 10000; i++)
     {
-        orders.Add(new Order
+        orders.Add(new Wasil.Data.Entities.Order
         {
             CustomerId = customer.Id,
             StoreId = store.Id,

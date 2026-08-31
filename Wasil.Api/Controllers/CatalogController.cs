@@ -22,14 +22,14 @@ public class CatalogController : ControllerBase
     }
 
     [HttpGet("stores/{id:int}")]
-    public IActionResult GetStoreDetails(int id)
+    public async System.Threading.Tasks.Task<IActionResult> GetStoreDetails(int id)
     {
-        var result = _catalogService.GetStoreDetails(id);
+        var result = await _catalogService.GetStoreDetailsAsync(id);
         return Ok(result);
     }
 
     [HttpGet("products")]
-    public IActionResult SearchProducts(
+    public async System.Threading.Tasks.Task<IActionResult> SearchProducts(
         [FromQuery] int? storeId,
         [FromQuery] int? categoryId,
         [FromQuery] string? text,
@@ -41,7 +41,12 @@ public class CatalogController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10)
     {
-        var result = _catalogService.SearchProducts(
+        if (pageSize != 10 && pageSize != 20 && pageSize != 50)
+        {
+            pageSize = 20;
+        }
+
+        var result = await _catalogService.SearchProductsAsync(
             storeId, categoryId, text, minPrice, maxPrice, inStockOnly, sortBy, sortOrder, page, pageSize);
         return Ok(result);
     }
